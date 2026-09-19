@@ -51,8 +51,8 @@ jobs:
       - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2, installs just
         with:
           tool: just
-      - uses: pnpm/action-setup@a7487c7e89a18df4991f7332223d3f4859b5a5fa # v4.1.0
-      - uses: actions/setup-node@cdca7365b12d28ead447f002c9e88f74adca0d82 # v4.4.0
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
