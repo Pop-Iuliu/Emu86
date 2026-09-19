@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flags with static bits, 1 MiB memory with segment-to-physical addressing
   and wraparound, repeatable reset state, flat binary loading.
 - Core: fetch/decode/execute for `MOV reg16, imm16` and `MOV reg8, imm8`;
-  unknown opcodes reported as `UnknownOpcode`.
+  unknown opcodes reported via `StepError`.
+- Core: `ADD AX, imm16` and `SUB AX, imm16` with full 8086 flag updates
+  (CF, PF, AF, ZF, SF, OF) in a dedicated ALU module; `HLT` halted state.
 
 - Cargo workspace with `emu86-core`, `emu86-cli`, `emu86-wasm` crates.
 - Pinned stable toolchain (`rust-toolchain.toml`), rustfmt config,

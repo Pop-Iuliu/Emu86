@@ -1,3 +1,4 @@
+use crate::alu;
 use crate::flags::Flags;
 use crate::mem::Memory;
 use crate::reg::{Reg16, Reg8, RegFile, Seg};
@@ -21,13 +22,17 @@ pub struct Snapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnknownOpcode(pub u8);
+pub enum StepError {
+    UnknownOpcode(u8),
+    Halted,
+}
 
 pub struct Cpu {
     pub regs: RegFile,
     pub ip: u16,
     pub flags: Flags,
     pub mem: Memory,
+    pub halted: bool,
 }
 
 impl Cpu {
@@ -37,6 +42,7 @@ impl Cpu {
             ip: 0x0000,
             flags: Flags::default(),
             mem: Memory::new(),
+            halted: false,
         };
         cpu.regs.set_seg(Seg::Cs, 0xFFFF);
         cpu
@@ -57,7 +63,10 @@ impl Cpu {
         (self.fetch8() as u16) << 8 | lo
     }
 
-    pub fn step(&mut self) -> Result<(), UnknownOpcode> {
+    pub fn step(&mut self) -> Result<(), StepError> {
+        if self.halted {
+            return Err(StepError::Halted);
+        }
         let op = self.fetch8();
         match op {
             0xB8..=0xBF => {
@@ -70,7 +79,22 @@ impl Cpu {
                 let imm = self.fetch8();
                 self.regs.set_reg8(r, imm);
             }
-            _ => return Err(UnknownOpcode(op)),
+            0x05 => {
+                let imm = self.fetch16();
+                let (r, f) = alu::add(self.regs.reg(Reg16::Ax), imm);
+                self.regs.set_reg(Reg16::Ax, r);
+                self.flags
+                    .set_bits((self.flags.bits() & !Flags::SETTABLE) | f);
+            }
+            0x2D => {
+                let imm = self.fetch16();
+                let (r, f) = alu::sub(self.regs.reg(Reg16::Ax), imm);
+                self.regs.set_reg(Reg16::Ax, r);
+                self.flags
+                    .set_bits((self.flags.bits() & !Flags::SETTABLE) | f);
+            }
+            0xF4 => self.halted = true,
+            op => return Err(StepError::UnknownOpcode(op)),
         }
         Ok(())
     }
@@ -169,8 +193,54 @@ mod tests {
     #[test]
     fn unknown_opcode_is_reported_not_panicked() {
         let mut cpu = cpu_with(&[0x0F]);
-        assert_eq!(cpu.step(), Err(UnknownOpcode(0x0F)));
+        assert_eq!(cpu.step(), Err(StepError::UnknownOpcode(0x0F)));
         assert_eq!(cpu.ip, RESET_OFF + 1);
+    }
+
+    #[test]
+    fn add_imm_to_ax_sets_flags() {
+        let mut cpu = cpu_with(&[0x05, 0x01, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 0xFFFF);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0);
+        assert!(cpu.flags.get(Flags::CF));
+        assert!(cpu.flags.get(Flags::ZF));
+        assert_eq!(cpu.ip, RESET_OFF + 3);
+    }
+
+    #[test]
+    fn sub_imm_from_ax_reports_borrow() {
+        let mut cpu = cpu_with(&[0x2D, 0x01, 0x00]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0xFFFF);
+        assert!(cpu.flags.get(Flags::CF));
+        assert!(cpu.flags.get(Flags::SF));
+        assert!(!cpu.flags.get(Flags::OF));
+    }
+
+    #[test]
+    fn alu_ops_leave_static_flag_bits_intact() {
+        let mut cpu = cpu_with(&[0x05, 0xFF, 0xFF]);
+        let static_bits = cpu.flags.bits() & !Flags::SETTABLE;
+        cpu.step().unwrap();
+        assert_eq!(cpu.flags.bits() & !Flags::SETTABLE, static_bits);
+    }
+
+    #[test]
+    fn hlt_halts_and_blocks_further_steps() {
+        let mut cpu = cpu_with(&[0xF4]);
+        cpu.step().unwrap();
+        assert!(cpu.halted);
+        assert_eq!(cpu.ip, RESET_OFF + 1);
+        assert_eq!(cpu.step(), Err(StepError::Halted));
+    }
+
+    #[test]
+    fn reset_clears_halted() {
+        let mut cpu = cpu_with(&[0xF4]);
+        cpu.step().unwrap();
+        cpu.reset();
+        assert!(!cpu.halted);
     }
 
     #[test]

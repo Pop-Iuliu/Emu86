@@ -14,6 +14,7 @@ impl Flags {
     pub const IF: u16 = 1 << 9;
     pub const DF: u16 = 1 << 10;
     pub const OF: u16 = 1 << 11;
+    pub const SETTABLE: u16 = Self::CF | Self::PF | Self::AF | Self::ZF | Self::SF | Self::OF;
 
     pub fn bits(self) -> u16 {
         self.0 | STATIC
@@ -30,6 +31,10 @@ impl Flags {
     pub fn set(&mut self, flag: u16, on: bool) {
         let b = self.bits();
         self.0 = if on { b | flag } else { b & !flag } & WRITABLE;
+    }
+
+    pub fn update(&mut self, mask: u16, bits: u16) {
+        self.set_bits((self.bits() & !mask) | bits);
     }
 }
 

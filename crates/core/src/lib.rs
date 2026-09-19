@@ -1,3 +1,4 @@
+pub mod alu;
 pub mod cpu;
 pub mod flags;
 pub mod mem;
