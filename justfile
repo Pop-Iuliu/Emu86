@@ -19,7 +19,7 @@ check:
 
 wasm-build:
     rustup target add wasm32-unknown-unknown
-    wasm-pack build crates/wasm --target web --out-dir ../../web/src/wasm
+    wasm-pack build crates/wasm --target web
 
 # Everything CI runs.
 ci:
