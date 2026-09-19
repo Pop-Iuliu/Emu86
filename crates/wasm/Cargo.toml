@@ -1,0 +1,17 @@
+[package]
+name = "emu86-wasm"
+description = "WASM adapter exposing emu86-core to the browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+emu86-core = { workspace = true }
+wasm-bindgen = { workspace = true }
+
+[lints]
+workspace = true

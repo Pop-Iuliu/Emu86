@@ -1,0 +1,18 @@
+[package]
+name = "emu86-cli"
+description = "Headless CLI for running and tracing 8086 programs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "emu86"
+path = "src/main.rs"
+
+[dependencies]
+emu86-core = { workspace = true }
+clap = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/cli", "crates/wasm"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Pop-Iuliu/Talon"
+
+[workspace.dependencies]
+emu86-core = { path = "crates/core" }
+clap = { version = "4", features = ["derive"] }
+wasm-bindgen = "0.2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+panic = "deny"
+
+[profile.release]
+opt-level = 3
+lto = true
