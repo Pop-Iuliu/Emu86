@@ -5,3 +5,5 @@ dist
 .DS_Store
 crates/wasm/pkg/
 web/src/wasm/
+test-results/
+playwright-report/
