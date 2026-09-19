@@ -1,5 +1,3 @@
-# emu86 task entrypoint — CI and local run the same recipes.
-
 default := "ci"
 
 fmt:
