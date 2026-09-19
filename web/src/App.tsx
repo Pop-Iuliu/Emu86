@@ -15,6 +15,7 @@ export default function App() {
         onReset={() => send({ type: "reset" })}
         busy={busy}
         hasProgram={hasProgram}
+        halted={snapshot?.halted === true}
       />
       {snapshot !== null && (
         <>

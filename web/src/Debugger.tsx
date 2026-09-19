@@ -40,7 +40,10 @@ interface ValueProps {
 
 function Value({ name, value, format, changed }: ValueProps) {
   return (
-    <div className={`${styles.cell} ${changed ? styles.changed : ""}`}>
+    <div
+      className={`${styles.cell} ${changed ? styles.changed : ""}`}
+      data-testid={`reg-${name.toLowerCase()}`}
+    >
       <span className={styles.name}>{name}</span>
       <span className={styles.value}>{format(value)}</span>
     </div>
@@ -121,13 +124,14 @@ interface ControlsProps {
   onReset: () => void;
   busy: boolean;
   hasProgram: boolean;
+  halted: boolean;
 }
 
-function Controls({ onLoad, onStep, onReset, busy, hasProgram }: ControlsProps) {
+function Controls({ onLoad, onStep, onReset, busy, hasProgram, halted }: ControlsProps) {
   return (
     <div className={styles.controls}>
       <button onClick={onLoad}>Load</button>
-      <button onClick={onStep} disabled={busy || !hasProgram}>
+      <button onClick={onStep} disabled={busy || !hasProgram || halted}>
         Step
       </button>
       <button onClick={onReset} disabled={busy || !hasProgram}>
@@ -138,7 +142,11 @@ function Controls({ onLoad, onStep, onReset, busy, hasProgram }: ControlsProps) 
 }
 
 function Halted({ halted }: { halted: boolean }) {
-  return halted ? <div className={styles.halted}>HALTED</div> : null;
+  return halted ? (
+    <div className={styles.halted} data-testid="halted">
+      HALTED
+    </div>
+  ) : null;
 }
 
 function ErrorLine({ error }: { error: string | null }) {

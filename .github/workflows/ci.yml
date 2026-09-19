@@ -69,3 +69,7 @@ jobs:
           just web-install
           just web-lint
           just web-build
+      - name: E2E smoke test
+        run: |
+          pnpm --dir web exec playwright install --with-deps chromium
+          pnpm --dir web exec playwright test
