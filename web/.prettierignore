@@ -1,0 +1,3 @@
+src/wasm/
+dist/
+pnpm-lock.yaml

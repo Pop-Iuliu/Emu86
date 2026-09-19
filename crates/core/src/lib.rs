@@ -4,7 +4,7 @@ pub mod flags;
 pub mod mem;
 pub mod reg;
 
-pub use cpu::{Cpu, Snapshot};
+pub use cpu::{Cpu, Snapshot, StepError};
 pub use flags::Flags;
 pub use mem::Memory;
 pub use reg::{Reg16, Reg8, RegFile, Seg};
