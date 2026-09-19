@@ -30,8 +30,15 @@ web-lint:
 web-build: wasm-build web-install
     pnpm --dir web build
 
+asm:
+    for f in tests/programs/*.asm; do nasm -O0 -f bin -o "${f%.asm}.bin" "$f"; done
+
+asm-verify: asm
+    git diff --exit-code tests/programs
+
 ci:
     just check
+    just asm-verify
     just wasm-build
     just web-lint
     just web-build

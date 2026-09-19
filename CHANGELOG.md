@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unknown opcodes reported via `StepError`.
 - Core: `ADD AX, imm16` and `SUB AX, imm16` with full 8086 flag updates
   (CF, PF, AF, ZF, SF, OF) in a dedicated ALU module; `HLT` halted state.
+- Web: debugger UI (Load/Step/Reset, registers, flags, change highlight,
+  halted banner) driving the core through a Web Worker + WASM adapter.
+- Web: Playwright smoke test running the demo program end-to-end.
+- Tests: NASM program-level suite (`tests/programs/`) with committed flat
+  binaries, expected final state, and CI source/binary drift detection.
 
 - Cargo workspace with `emu86-core`, `emu86-cli`, `emu86-wasm` crates.
 - Pinned stable toolchain (`rust-toolchain.toml`), rustfmt config,
