@@ -7,3 +7,7 @@ crates/wasm/pkg/
 web/src/wasm/
 test-results/
 playwright-report/
+
+# local-only docs
+HANDOVER.md
+docs/HANDOVER.md
