@@ -1,6 +1,6 @@
 use crate::flags::Flags;
 use crate::mem::Memory;
-use crate::reg::{Reg16, RegFile, Seg};
+use crate::reg::{Reg16, Reg8, RegFile, Seg};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Snapshot {
@@ -19,6 +19,9 @@ pub struct Snapshot {
     pub ip: u16,
     pub flags: u16,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnknownOpcode(pub u8);
 
 pub struct Cpu {
     pub regs: RegFile,
@@ -41,6 +44,35 @@ impl Cpu {
 
     pub fn reset(&mut self) {
         *self = Self::new();
+    }
+
+    fn fetch8(&mut self) -> u8 {
+        let b = self.mem.read(self.linear_ip());
+        self.ip = self.ip.wrapping_add(1);
+        b
+    }
+
+    fn fetch16(&mut self) -> u16 {
+        let lo = self.fetch8() as u16;
+        (self.fetch8() as u16) << 8 | lo
+    }
+
+    pub fn step(&mut self) -> Result<(), UnknownOpcode> {
+        let op = self.fetch8();
+        match op {
+            0xB8..=0xBF => {
+                let r = Reg16::from_index(op - 0xB8);
+                let imm = self.fetch16();
+                self.regs.set_reg(r, imm);
+            }
+            0xB0..=0xB7 => {
+                let r = Reg8::from_index(op - 0xB0);
+                let imm = self.fetch8();
+                self.regs.set_reg8(r, imm);
+            }
+            _ => return Err(UnknownOpcode(op)),
+        }
+        Ok(())
     }
 
     pub fn linear_ip(&self) -> usize {
@@ -80,7 +112,66 @@ impl Default for Cpu {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reg::Reg8;
+
+    const RESET_SEG: u16 = 0xFFFF;
+    const RESET_OFF: u16 = 0x0000;
+
+    fn cpu_with(code: &[u8]) -> Cpu {
+        let mut cpu = Cpu::new();
+        cpu.load_flat(RESET_SEG, RESET_OFF, code);
+        cpu
+    }
+
+    #[test]
+    fn mov_word_immediate() {
+        let mut cpu = cpu_with(&[0xB8, 0x34, 0x12]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x1234);
+        assert_eq!(cpu.ip, RESET_OFF + 3);
+    }
+
+    #[test]
+    fn mov_word_immediate_all_regs() {
+        for i in 0u8..8 {
+            let mut cpu = cpu_with(&[0xB8 + i, 0xCD, 0xAB]);
+            cpu.step().unwrap();
+            assert_eq!(cpu.regs.reg(Reg16::from_index(i)), 0xABCD);
+        }
+    }
+
+    #[test]
+    fn mov_byte_immediate_hits_high_byte_view() {
+        let mut cpu = cpu_with(&[0xB7, 0x56]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg8(Reg8::Bh), 0x56);
+        assert_eq!(cpu.regs.reg(Reg16::Bx), 0x5600);
+        assert_eq!(cpu.ip, RESET_OFF + 2);
+    }
+
+    #[test]
+    fn consecutive_movs() {
+        let mut cpu = cpu_with(&[0xB8, 0x01, 0x00, 0xB9, 0x02, 0x00]);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0001);
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0x0002);
+        assert_eq!(cpu.ip, RESET_OFF + 6);
+    }
+
+    #[test]
+    fn mov_does_not_touch_flags() {
+        let before = cpu_with(&[0xB8, 0x00, 0x00]).flags.bits();
+        let mut cpu = cpu_with(&[0xB8, 0x00, 0x00]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.flags.bits(), before);
+    }
+
+    #[test]
+    fn unknown_opcode_is_reported_not_panicked() {
+        let mut cpu = cpu_with(&[0x0F]);
+        assert_eq!(cpu.step(), Err(UnknownOpcode(0x0F)));
+        assert_eq!(cpu.ip, RESET_OFF + 1);
+    }
 
     #[test]
     fn reset_state_is_repeatable() {

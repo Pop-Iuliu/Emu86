@@ -79,6 +79,36 @@ impl RegFile {
     }
 }
 
+impl Reg16 {
+    pub fn from_index(i: u8) -> Self {
+        match i & 0b111 {
+            0 => Self::Ax,
+            1 => Self::Cx,
+            2 => Self::Dx,
+            3 => Self::Bx,
+            4 => Self::Sp,
+            5 => Self::Bp,
+            6 => Self::Si,
+            _ => Self::Di,
+        }
+    }
+}
+
+impl Reg8 {
+    pub fn from_index(i: u8) -> Self {
+        match i & 0b111 {
+            0 => Self::Al,
+            1 => Self::Cl,
+            2 => Self::Dl,
+            3 => Self::Bl,
+            4 => Self::Ah,
+            5 => Self::Ch,
+            6 => Self::Dh,
+            _ => Self::Bh,
+        }
+    }
+}
+
 impl Default for RegFile {
     fn default() -> Self {
         Self::new()
