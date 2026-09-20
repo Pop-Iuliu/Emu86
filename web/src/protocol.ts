@@ -38,16 +38,3 @@ export const hex20 = (v: number): string => v.toString(16).toUpperCase().padStar
 
 export const RESET_SEG = 0xffff;
 export const RESET_OFF = 0x0000;
-
-export const DEMO_PROGRAM: number[] = [
-  0xb8,
-  0x01,
-  0x00, // MOV AX, 1
-  0x05,
-  0x02,
-  0x00, // ADD AX, 2
-  0x2d,
-  0x01,
-  0x00, // SUB AX, 1
-  0xf4, // HLT
-];

@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`83 /0`, `83 /5`), and `MOV` between r/m and reg for byte and word
   (`88`–`8B`); MOV leaves flags untouched; unsupported ModRM forms reported
   via `StepError::UnsupportedForm` with instruction address and bytes.
+- Core/wasm/web: single `memory` demonstration program — stored as NASM
+  source + committed binary, embedded by `demo_program()` for the browser
+  demo, checkpointed in integration tests (registers, `DS:0020` bytes,
+  flag transitions `F002 → F096 → F093`) and asserted by the Playwright
+  smoke test; the hardcoded web-side byte copy was removed.
 - Web: debugger UI (Load/Step/Reset, registers, flags, change highlight,
   halted banner) driving the core through a Web Worker + WASM adapter.
 - Web: Playwright smoke test running the demo program end-to-end.

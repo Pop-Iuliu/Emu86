@@ -1,5 +1,5 @@
-import init, { Emu86 } from "./wasm/emu86_wasm.js";
-import { DEMO_PROGRAM, RESET_SEG, RESET_OFF } from "./protocol";
+import init, { demo_program, Emu86 } from "./wasm/emu86_wasm.js";
+import { RESET_SEG, RESET_OFF } from "./protocol";
 
 const ctx = self as unknown as Worker;
 
@@ -20,7 +20,7 @@ ctx.onmessage = async (e: MessageEvent) => {
   switch (req.type) {
     case "load":
       emu.reset();
-      reply(emu.load(RESET_SEG, RESET_OFF, new Uint8Array(DEMO_PROGRAM)));
+      reply(emu.load(RESET_SEG, RESET_OFF, demo_program()));
       break;
     case "step":
       try {

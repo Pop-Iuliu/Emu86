@@ -67,6 +67,11 @@ pub struct Emu86 {
 }
 
 #[wasm_bindgen]
+pub fn demo_program() -> Vec<u8> {
+    include_bytes!("../../../tests/programs/memory.bin").to_vec()
+}
+
+#[wasm_bindgen]
 impl Emu86 {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
