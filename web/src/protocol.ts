@@ -15,6 +15,9 @@ export interface Snapshot {
   flags: number;
   halted: boolean;
   linear_ip: number;
+  demo_mem_start: number;
+  demo_mem: number[];
+  insn_bytes: number[];
 }
 
 export interface Request {
@@ -33,6 +36,7 @@ export interface ErrorResponse {
 
 export type AnyResponse = Response | ErrorResponse;
 
+export const hex8 = (v: number): string => v.toString(16).toUpperCase().padStart(2, "0");
 export const hex16 = (v: number): string => v.toString(16).toUpperCase().padStart(4, "0");
 export const hex20 = (v: number): string => v.toString(16).toUpperCase().padStart(5, "0");
 

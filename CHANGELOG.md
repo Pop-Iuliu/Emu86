@@ -28,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   demo, checkpointed in integration tests (registers, `DS:0020` bytes,
   flag transitions `F002 → F096 → F093`) and asserted by the Playwright
   smoke test; the hardcoded web-side byte copy was removed.
+- Web: memory inspector showing a fixed 32-byte window around the demo
+  data location (`0x0010`–`0x002F`) with per-byte change highlights;
+  snapshot snapshots carry only the displayed bytes through the
+  core → wasm → worker path.
+- Web: "Last step" panel listing changed registers, the flags word with
+  changed bit names, and visible memory bytes (previous → current);
+  states when nothing displayed changed; comparisons cleared on load
+  and reset.
+- Web: execution panel labels CS:IP as the next instruction address with
+  the physical address and a byte window; after HLT it shows the last
+  executed address and explains IP advanced past HLT; flag hover
+  explanations (CF vs OF); focus-visible outlines, tabular hex
+  alignment, distinct busy/halted/error styling.
 - Web: debugger UI (Load/Step/Reset, registers, flags, change highlight,
   halted banner) driving the core through a Web Worker + WASM adapter.
 - Web: Playwright smoke test running the demo program end-to-end.

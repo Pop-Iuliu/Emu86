@@ -37,6 +37,9 @@ export function useEmulator(): EmulatorState {
 
   const send = useCallback((req: Request) => {
     setBusy(true);
+    if (req.type !== "step") {
+      currentRef.current = null;
+    }
     workerRef.current?.postMessage(req);
   }, []);
 

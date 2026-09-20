@@ -35,6 +35,8 @@ immediate of `MOV AX, 0x1234` and the `HLT` wrap to `0x0000..0x0001`.
 The single demo program shared by the core fixtures, the WASM binding
 (`demo_program()` embeds the committed `memory.bin`) and the browser UI.
 Data lives at the dedicated location `DS:0020` (`DS = 0` at reset).
+The browser memory inspector shows the fixed physical window
+`0x0010–0x002F` (32 bytes) around that location.
 
 | After              | ip       | State                                                                                      |
 | ------------------ | -------- | ------------------------------------------------------------------------------------------ |

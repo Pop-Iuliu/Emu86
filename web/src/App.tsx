@@ -1,5 +1,14 @@
 import { useEmulator } from "./useEmulator";
-import { Controls, ErrorLine, Flags, Halted, Registers } from "./Debugger";
+import {
+  Controls,
+  ErrorLine,
+  Execution,
+  Flags,
+  Halted,
+  LastStep,
+  MemoryInspector,
+  Registers,
+} from "./Debugger";
 import styles from "./App.module.css";
 
 export default function App() {
@@ -17,11 +26,15 @@ export default function App() {
         hasProgram={hasProgram}
         halted={snapshot?.halted === true}
       />
+      {busy && <p className={styles.busy}>working…</p>}
       {snapshot !== null && (
         <>
           <Halted halted={snapshot.halted} />
+          <Execution snapshot={snapshot} />
           <Registers snapshot={snapshot} prev={prev} />
           <Flags snapshot={snapshot} prev={prev} />
+          <MemoryInspector snapshot={snapshot} prev={prev} />
+          <LastStep snapshot={snapshot} prev={prev} />
           <ErrorLine error={error} />
         </>
       )}

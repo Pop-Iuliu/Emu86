@@ -2,6 +2,10 @@ use emu86_core::{Cpu, Snapshot, StepError};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+const DEMO_WINDOW_START: u32 = 0x0010;
+const DEMO_WINDOW_LEN: usize = 32;
+const INSN_WINDOW_LEN: usize = 6;
+
 #[derive(Serialize)]
 struct SnapshotView {
     ax: u16,
@@ -20,6 +24,9 @@ struct SnapshotView {
     flags: u16,
     halted: bool,
     linear_ip: u32,
+    demo_mem_start: u32,
+    demo_mem: Vec<u8>,
+    insn_bytes: Vec<u8>,
 }
 
 impl From<&Cpu> for SnapshotView {
@@ -40,6 +47,7 @@ impl From<&Cpu> for SnapshotView {
             ip,
             flags,
         } = cpu.snapshot();
+        let linear_ip = ((cs as u32) << 4).wrapping_add(ip as u32) & 0xF_FFFF;
         Self {
             ax,
             cx,
@@ -56,7 +64,14 @@ impl From<&Cpu> for SnapshotView {
             ip,
             flags,
             halted: cpu.halted,
-            linear_ip: ((cs as u32) << 4).wrapping_add(ip as u32) & 0xF_FFFF,
+            linear_ip,
+            demo_mem_start: DEMO_WINDOW_START,
+            demo_mem: (0..DEMO_WINDOW_LEN)
+                .map(|i| cpu.mem.read((DEMO_WINDOW_START + i as u32) as usize))
+                .collect(),
+            insn_bytes: (0..INSN_WINDOW_LEN)
+                .map(|i| cpu.mem.read((linear_ip as usize).wrapping_add(i)))
+                .collect(),
         }
     }
 }
