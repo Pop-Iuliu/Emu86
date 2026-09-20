@@ -33,6 +33,7 @@ pub enum Seg {
     Ds = 3,
 }
 
+#[derive(Clone, Copy)]
 pub struct RegFile {
     words: [u16; 8],
     segs: [u16; 4],

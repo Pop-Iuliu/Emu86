@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unknown opcodes reported via `StepError`.
 - Core: `ADD AX, imm16` and `SUB AX, imm16` with full 8086 flag updates
   (CF, PF, AF, ZF, SF, OF) in a dedicated ALU module; `HLT` halted state.
+- Core: ModRM operand decoder (`modrm.rs`) resolving register-direct and all
+  eight effective-address forms (mod 0/1/2, direct address, disp8 sign
+  extension, DS default / SS for BP-based addressing, 16-bit wrap).
+- Core: `ADD/SUB r/m16, imm16` (`81 /0`, `81 /5`), `ADD/SUB r/m16, imm8`
+  (`83 /0`, `83 /5`), and `MOV` between r/m and reg for byte and word
+  (`88`–`8B`); MOV leaves flags untouched; unsupported ModRM forms reported
+  via `StepError::UnsupportedForm` with instruction address and bytes.
 - Web: debugger UI (Load/Step/Reset, registers, flags, change highlight,
   halted banner) driving the core through a Web Worker + WASM adapter.
 - Web: Playwright smoke test running the demo program end-to-end.

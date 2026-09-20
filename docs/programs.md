@@ -2,7 +2,9 @@
 
 Each `.asm` is restricted to `cpu 8086` (NASM rejects 386+ mnemonics) and to
 the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
-`ADD AX, imm16` (`05 iw`), `SUB AX, imm16` (`2D iw`), `HLT` (`F4`).
+`ADD/SUB r/m16, imm` (`81 /0`, `81 /5`, `83 /0`, `83 /5`), `MOV` between
+r/m and reg for byte and word (`88`–`8B`), `ADD AX, imm16` (`05 iw`),
+`SUB AX, imm16` (`2D iw`), `HLT` (`F4`).
 NASM is invoked with `-O0` so `add ax, imm` assembles to the canonical
 `05 iw` form rather than the r/m form `83 /0`.
 
@@ -23,6 +25,7 @@ always read as 1).
 | `overflow`    | signed overflow            | `8000`     | `F896`      | `0x7FFF+1` crosses +32767 → OF set, SF set; CF clear (Intel SDM Vol.1 §5.1.3 signed-integer overflow) |
 | `underflow`   | subtraction underflow      | `FFFF`     | `F097`      | `0-1` borrows: CF set (borrow), SF set, OF clear (−1 is representable), AF set                       |
 | `wrap`        | 1 MiB fetch/load wrapping  | `1234`     | `F002`      | program's last 3 bytes straddle `0xFFFFF`→`0x0`; 8086 has no A20 gate, addresses wrap (see ADR-0001)  |
+| `memory`      | store → modify in RAM → load | `0100`     | `F013`      | `MOV [bx],ax`, `ADD word [bx],0x1000`, `SUB word [bx],byte -1` (sign-extended to 0xFFFF → CF+AF), `MOV cx,[bx]` loads `0x1101` back |
 
 `wrap` byte layout: 16 bytes fill `0xFFFF0..0xFFFFF` exactly; the
 immediate of `MOV AX, 0x1234` and the `HLT` wrap to `0x0000..0x0001`.

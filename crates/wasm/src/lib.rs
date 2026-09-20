@@ -88,6 +88,9 @@ impl Emu86 {
             Ok(()) => Ok(self.view()),
             Err(StepError::Halted) => Err("halted".into()),
             Err(StepError::UnknownOpcode(op)) => Err(format!("unknown opcode {op:#04x}").into()),
+            Err(StepError::UnsupportedForm { ip, bytes }) => {
+                Err(format!("unsupported form at {ip:#06x}: {:02x?}", bytes).into())
+            }
         }
     }
 

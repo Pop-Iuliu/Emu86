@@ -1,6 +1,7 @@
 use crate::alu;
 use crate::flags::Flags;
 use crate::mem::Memory;
+use crate::modrm::Operand;
 use crate::reg::{Reg16, Reg8, RegFile, Seg};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,9 +22,10 @@ pub struct Snapshot {
     pub flags: u16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepError {
     UnknownOpcode(u8),
+    UnsupportedForm { ip: u16, bytes: Vec<u8> },
     Halted,
 }
 
@@ -67,6 +69,7 @@ impl Cpu {
         if self.halted {
             return Err(StepError::Halted);
         }
+        let start = self.ip;
         let op = self.fetch8();
         match op {
             0xB8..=0xBF => {
@@ -79,24 +82,85 @@ impl Cpu {
                 let imm = self.fetch8();
                 self.regs.set_reg8(r, imm);
             }
+            0x81 | 0x83 => self.alu_rm_imm(start, op)?,
+            0x88..=0x8B => self.mov_rm_reg(op),
             0x05 => {
                 let imm = self.fetch16();
                 let (r, f) = alu::add(self.regs.reg(Reg16::Ax), imm);
                 self.regs.set_reg(Reg16::Ax, r);
-                self.flags
-                    .set_bits((self.flags.bits() & !Flags::SETTABLE) | f);
+                self.set_flag_bits(f);
             }
             0x2D => {
                 let imm = self.fetch16();
                 let (r, f) = alu::sub(self.regs.reg(Reg16::Ax), imm);
                 self.regs.set_reg(Reg16::Ax, r);
-                self.flags
-                    .set_bits((self.flags.bits() & !Flags::SETTABLE) | f);
+                self.set_flag_bits(f);
             }
             0xF4 => self.halted = true,
             op => return Err(StepError::UnknownOpcode(op)),
         }
         Ok(())
+    }
+
+    fn alu_rm_imm(&mut self, start: u16, op: u8) -> Result<(), StepError> {
+        let modrm = self.fetch8();
+        match (modrm >> 3) & 0b111 {
+            0 => {
+                let dst = self.decode_rm(modrm, true);
+                let imm = if op == 0x81 {
+                    self.fetch16()
+                } else {
+                    self.fetch8() as i8 as u16
+                };
+                let (r, f) = alu::add(dst.read(&self.regs, &self.mem), imm);
+                dst.write(&mut self.regs, &mut self.mem, r);
+                self.set_flag_bits(f);
+            }
+            5 => {
+                let dst = self.decode_rm(modrm, true);
+                let imm = if op == 0x81 {
+                    self.fetch16()
+                } else {
+                    self.fetch8() as i8 as u16
+                };
+                let (r, f) = alu::sub(dst.read(&self.regs, &self.mem), imm);
+                dst.write(&mut self.regs, &mut self.mem, r);
+                self.set_flag_bits(f);
+            }
+            _ => return Err(self.unsupported_form(start)),
+        }
+        Ok(())
+    }
+
+    fn mov_rm_reg(&mut self, op: u8) {
+        let modrm = self.fetch8();
+        let wide = op & 1 == 1;
+        let reg_is_src = op & 2 == 0;
+        let rm = self.decode_rm(modrm, wide);
+        let reg = Operand::decode_reg(modrm, wide);
+        let (src, dst) = if reg_is_src { (reg, rm) } else { (rm, reg) };
+        let v = src.read(&self.regs, &self.mem);
+        dst.write(&mut self.regs, &mut self.mem, v);
+    }
+
+    fn decode_rm(&mut self, modrm: u8, wide: bool) -> Operand {
+        let regs = self.regs;
+        let mut fetch = || self.fetch8();
+        Operand::decode_rm(&mut fetch, regs, modrm, wide)
+    }
+
+    fn unsupported_form(&self, start: u16) -> StepError {
+        let base = Memory::linear(self.regs.seg(Seg::Cs), start);
+        let len = self.ip.wrapping_sub(start) as usize;
+        StepError::UnsupportedForm {
+            ip: start,
+            bytes: (0..len).map(|i| self.mem.read(base + i)).collect(),
+        }
+    }
+
+    fn set_flag_bits(&mut self, f: u16) {
+        self.flags
+            .set_bits((self.flags.bits() & !Flags::SETTABLE) | f);
     }
 
     pub fn linear_ip(&self) -> usize {
@@ -273,5 +337,95 @@ mod tests {
         assert_eq!(cpu.mem.read(FFFF0 + 1), 0x34);
         assert_eq!(cpu.mem.read(FFFF0 + 2), 0x12);
         assert_eq!(cpu.linear_ip(), FFFF0);
+    }
+
+    #[test]
+    fn memory_program_store_modify_load_halt() {
+        let mut cpu = cpu_with(&[
+            0xBB, 0x20, 0x00, 0xB8, 0x00, 0x01, 0x89, 0x07, 0x81, 0x07, 0x00, 0x10, 0x83, 0x2F,
+            0xFF, 0x8B, 0x0F, 0xF4,
+        ]);
+        while !cpu.halted {
+            cpu.step().unwrap();
+        }
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0x1101);
+        assert_eq!(cpu.mem.read_word(0x0020), 0x1101);
+        assert_eq!(cpu.ip, RESET_OFF + 18);
+    }
+
+    #[test]
+    fn byte_mov_moves_between_low_and_high_regs() {
+        let mut cpu = cpu_with(&[0xB5, 0x11, 0x88, 0xE9, 0x8A, 0xE1]);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg8(Reg8::Cl), 0x11);
+        assert_eq!(cpu.regs.reg8(Reg8::Ch), 0x11);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg8(Reg8::Ah), 0x11);
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0x1111);
+    }
+
+    #[test]
+    fn word_mov_loads_direct_address_from_ds() {
+        let mut cpu = cpu_with(&[0x8B, 0x1E, 0x00, 0x10]);
+        cpu.regs.set_seg(Seg::Ds, 0x1000);
+        cpu.mem.write_word(0x11000, 0xBEEF);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Bx), 0xBEEF);
+    }
+
+    #[test]
+    fn bp_addressing_uses_ss() {
+        let mut cpu = cpu_with(&[0x8A, 0x7E, 0x01]);
+        cpu.regs.set_seg(Seg::Ss, 0x2000);
+        cpu.regs.set_seg(Seg::Ds, 0x1000);
+        cpu.regs.set_reg(Reg16::Bp, 0x0005);
+        cpu.mem.write(0x20006, 0xAB);
+        cpu.mem.write(0x10006, 0xCD);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg8(Reg8::Bh), 0xAB);
+    }
+
+    #[test]
+    fn word_mov_loads_with_disp16() {
+        let mut cpu = cpu_with(&[0x8B, 0x8E, 0x34, 0x12]);
+        cpu.regs.set_reg(Reg16::Bp, 0x0100);
+        cpu.regs.set_seg(Seg::Ss, 0x1000);
+        cpu.mem.write_word(0x11334, 0x5A5A);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0x5A5A);
+    }
+
+    #[test]
+    fn effective_addresses_wrap_at_16_bits() {
+        let mut cpu = cpu_with(&[0x89, 0x47, 0x01]);
+        cpu.regs.set_reg(Reg16::Bx, 0xFFFF);
+        cpu.regs.set_reg(Reg16::Ax, 0x1234);
+        cpu.step().unwrap();
+        assert_eq!(cpu.mem.read_word(0x00000), 0x1234);
+    }
+
+    #[test]
+    fn memory_mov_does_not_touch_flags() {
+        let mut cpu = cpu_with(&[0x05, 0xFF, 0xFF, 0x89, 0x07, 0x8B, 0x0F]);
+        cpu.regs.set_reg(Reg16::Bx, 0x0040);
+        cpu.step().unwrap();
+        let before = cpu.flags.bits();
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert_eq!(cpu.flags.bits(), before);
+    }
+
+    #[test]
+    fn unsupported_form_reports_ip_and_bytes() {
+        let mut cpu = cpu_with(&[0x81, 0xC8, 0x34, 0x12]);
+        assert_eq!(
+            cpu.step(),
+            Err(StepError::UnsupportedForm {
+                ip: RESET_OFF,
+                bytes: vec![0x81, 0xC8],
+            })
+        );
+        assert_eq!(cpu.ip, RESET_OFF + 2);
     }
 }

@@ -46,7 +46,7 @@ fn run_program(bin: &[u8]) -> Cpu {
 
 #[test]
 fn programs_match_expected_results() {
-    for name in ["arith", "carry", "overflow", "underflow", "wrap"] {
+    for name in ["arith", "carry", "overflow", "underflow", "wrap", "memory"] {
         let bin = std::fs::read(format!("{PROGRAM_DIR}/{name}.bin")).unwrap();
         let expected = std::fs::read_to_string(format!("{PROGRAM_DIR}/{name}.expected")).unwrap();
         let e = parse_expected(&expected);
@@ -72,7 +72,7 @@ fn wrap_program_fetches_across_one_mebibyte_boundary() {
 
 #[test]
 fn replay_produces_identical_results() {
-    for name in ["arith", "carry", "overflow", "underflow", "wrap"] {
+    for name in ["arith", "carry", "overflow", "underflow", "wrap", "memory"] {
         let bin = std::fs::read(format!("{PROGRAM_DIR}/{name}.bin")).unwrap();
 
         let mut cpu = Cpu::new();
@@ -91,6 +91,14 @@ fn replay_produces_identical_results() {
 
         assert_eq!(first, second, "{name}: replay diverged");
     }
+}
+
+#[test]
+fn memory_program_roundtrips_through_ram() {
+    let bin = std::fs::read(format!("{PROGRAM_DIR}/memory.bin")).unwrap();
+    let cpu = run_program(&bin);
+    assert_eq!(cpu.regs.reg(Reg16::Cx), 0x1101);
+    assert_eq!(cpu.mem.read_word(0x0020), 0x1101);
 }
 
 #[test]
