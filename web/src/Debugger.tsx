@@ -269,6 +269,7 @@ function Controls({ onLoad, onStep, onReset, busy, hasProgram, halted }: Control
       <button onClick={onReset} disabled={busy || !hasProgram}>
         Reset
       </button>
+      {busy && <span className={styles.busy}>working…</span>}
     </div>
   );
 }

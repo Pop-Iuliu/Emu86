@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   executed address and explains IP advanced past HLT; flag hover
   explanations (CF vs OF); focus-visible outlines, tabular hex
   alignment, distinct busy/halted/error styling.
+
+### Fixed
+
+- Web: no more layout wobble while stepping — the busy indicator moved
+  inline into the controls row (it no longer mounts a `<p>` that shifts
+  the page), register values reserve their highlight padding up front,
+  and memory bytes keep a fixed `2ch` width in both weights.
 - Web: debugger UI (Load/Step/Reset, registers, flags, change highlight,
   halted banner) driving the core through a Web Worker + WASM adapter.
 - Web: Playwright smoke test running the demo program end-to-end.

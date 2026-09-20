@@ -31,6 +31,7 @@
 .busy {
   font-style: italic;
   opacity: 0.6;
+  align-self: center;
 }
 
 .panel {
@@ -71,13 +72,13 @@
 .value {
   font-weight: bold;
   font-variant-numeric: tabular-nums;
+  padding: 0 0.2rem;
 }
 
 .changed .value {
   color: #ffcf3f;
   background: #2c2716;
   border-radius: 3px;
-  padding: 0 0.2rem;
 }
 
 .execRow {
@@ -101,6 +102,7 @@
 }
 
 .memByte {
+  display: inline-block;
   width: 2ch;
   text-align: center;
   font-variant-numeric: tabular-nums;

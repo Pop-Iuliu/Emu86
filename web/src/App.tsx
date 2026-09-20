@@ -26,7 +26,6 @@ export default function App() {
         hasProgram={hasProgram}
         halted={snapshot?.halted === true}
       />
-      {busy && <p className={styles.busy}>working…</p>}
       {snapshot !== null && (
         <>
           <Halted halted={snapshot.halted} />
