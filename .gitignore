@@ -11,3 +11,4 @@ playwright-report/
 # local-only docs
 HANDOVER.md
 docs/HANDOVER.md
+.aider*
