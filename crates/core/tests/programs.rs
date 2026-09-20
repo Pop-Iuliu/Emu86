@@ -94,11 +94,43 @@ fn replay_produces_identical_results() {
 }
 
 #[test]
-fn memory_program_roundtrips_through_ram() {
+fn memory_program_hits_checkpoints() {
     let bin = std::fs::read(format!("{PROGRAM_DIR}/memory.bin")).unwrap();
-    let cpu = run_program(&bin);
-    assert_eq!(cpu.regs.reg(Reg16::Cx), 0x1101);
-    assert_eq!(cpu.mem.read_word(0x0020), 0x1101);
+    let mut cpu = Cpu::new();
+    cpu.load_flat(0xFFFF, 0x0000, &bin);
+
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Bx), 0x0020);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0xBEEF);
+    cpu.step().unwrap();
+    assert_eq!(cpu.mem.read_word(0x0020), 0xBEEF);
+    assert_eq!(cpu.flags.bits(), 0xF002);
+    cpu.step().unwrap();
+    assert_eq!(cpu.mem.read_word(0x0020), 0xD000);
+    assert_eq!(cpu.flags.bits(), 0xF096);
+    cpu.step().unwrap();
+    assert_eq!(cpu.mem.read_word(0x0020), 0xD001);
+    assert_eq!(cpu.flags.bits(), 0xF093);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Cx), 0xD001);
+    cpu.step().unwrap();
+    assert!(cpu.halted);
+    assert_eq!(cpu.ip, 0x0012);
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0xBEEF);
+}
+
+#[test]
+fn memory_program_uses_planned_encodings() {
+    let bin = std::fs::read(format!("{PROGRAM_DIR}/memory.bin")).unwrap();
+    assert_eq!(&bin[0..3], &[0xBB, 0x20, 0x00]);
+    assert_eq!(&bin[3..6], &[0xB8, 0xEF, 0xBE]);
+    assert_eq!(&bin[6..8], &[0x89, 0x07]);
+    assert_eq!(&bin[8..12], &[0x81, 0x07, 0x11, 0x11]);
+    assert_eq!(&bin[12..15], &[0x83, 0x2F, 0xFF]);
+    assert_eq!(&bin[15..17], &[0x8B, 0x0F]);
+    assert_eq!(bin[17], 0xF4);
+    assert_eq!(bin.len(), 18);
 }
 
 #[test]
