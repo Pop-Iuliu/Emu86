@@ -352,6 +352,7 @@ fn instruction_fetch_wraps_at_one_mebibyte() {
     // memory onto 0x00000, so the fetch must wrap.
     let mut cpu = Cpu::new();
     cpu.load_flat(0xFFFF, 0x000E, &[0xB8, 0x34, 0x12]); // MOV AX, 0x1234
+    cpu.ip = 0x000E;
     cpu.step().expect("MOV should execute");
     assert_eq!(cpu.regs.reg(Reg16::Ax), 0x1234);
     assert_eq!(cpu.ip, 0x0011);
