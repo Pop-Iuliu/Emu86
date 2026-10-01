@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Web: **Load binary…** — open a raw flat `.bin` (NASM `-f bin` output) and
+  run it in the debugger; size-validated (non-empty, ≤ 1 MiB) before it
+  replaces the current program, with the filename, byte count and load
+  address (`FFFF:0000`) shown in a new Program panel; the loading
+  convention is documented in README ("Loading a program").
+- Web: **Reset** replays the loaded program — reloads the image at
+  `FFFF:0000` on top of the reset state so stepping can restart without
+  reselecting the file; the demo load is now **Load demo**.
+- Web: loading clears last-step comparisons and execution history; load
+  errors are shown even before any program is loaded.
 - Core: register file (word + 8-bit byte views, segment registers), 8086
   flags with static bits, 1 MiB memory with segment-to-physical addressing
   and wraparound, repeatable reset state, flat binary loading.

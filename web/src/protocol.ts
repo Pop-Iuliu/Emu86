@@ -20,13 +20,23 @@ export interface Snapshot {
   insn_bytes: number[];
 }
 
-export interface Request {
-  type: "load" | "step" | "reset";
+export interface ProgramInfo {
+  name: string;
+  size: number;
+  seg: number;
+  off: number;
 }
+
+export type Request =
+  | { type: "load" }
+  | { type: "loadBinary"; name: string; bytes: Uint8Array }
+  | { type: "step" }
+  | { type: "reset" };
 
 export interface Response {
   ok: true;
   snapshot: Snapshot;
+  program: ProgramInfo | null;
 }
 
 export interface ErrorResponse {
@@ -42,3 +52,4 @@ export const hex20 = (v: number): string => v.toString(16).toUpperCase().padStar
 
 export const RESET_SEG = 0xffff;
 export const RESET_OFF = 0x0000;
+export const MAX_PROGRAM_BYTES = 0x100000;

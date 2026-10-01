@@ -27,6 +27,28 @@ just test      # unit tests
 just build     # debug build
 ```
 
+## Loading a program
+
+The debugger runs raw flat binaries — NASM output, no headers, no relocations:
+
+```sh
+nasm -O0 -f bin -o prog.bin prog.asm
+```
+
+- **Load demo** embeds the shared `memory` demo (`tests/programs/memory.bin`)
+  and is the quickest way to start.
+- **Load binary…** opens any `.bin` and runs it in the debugger.
+
+Loading convention: the image is copied verbatim at `FFFF:0000` (physical
+`0xFFFF0`) into a freshly reset CPU (`CS=FFFF`, `IP=0000`, `FLAGS=F002`), so
+execution starts at the first byte of the file. Files must be non-empty and
+at most 1 MiB (`0x100000` bytes — the 8086 address space); anything else is
+rejected and the currently loaded program is kept. Images longer than 16
+bytes wrap past `0xFFFFF` the way 8086 addressing does (no A20 gate).
+
+**Reset** restores the loaded image and the reset state, ready to step
+again — no need to reselect the file.
+
 ## Toolchains
 
 Pinned by `rust-toolchain.toml` (stable Rust) — rustup will fetch it

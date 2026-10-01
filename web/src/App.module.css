@@ -34,6 +34,10 @@
   align-self: center;
 }
 
+.fileInput {
+  display: none;
+}
+
 .panel {
   border: 1px solid #444;
   border-radius: 6px;

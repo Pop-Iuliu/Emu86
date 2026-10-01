@@ -1,5 +1,6 @@
+import { useRef, type ChangeEvent } from "react";
 import styles from "./App.module.css";
-import { hex8, hex16, hex20, type Snapshot } from "./protocol";
+import { hex8, hex16, hex20, type ProgramInfo, type Snapshot } from "./protocol";
 
 const WORD_REGS = [
   ["ax", "AX"],
@@ -90,6 +91,24 @@ function Registers({ snapshot, prev }: PanelProps) {
   );
 }
 
+function Program({ info }: { info: ProgramInfo }) {
+  return (
+    <section className={styles.panel}>
+      <h2>Program</h2>
+      <div className={styles.execRow} data-testid="program-info">
+        <span className={styles.value}>{info.name}</span>
+        <span className={styles.value}>{info.size} bytes</span>
+        <span className={styles.value}>
+          {hex16(info.seg)}:{hex16(info.off)}
+        </span>
+      </div>
+      <p className={styles.note}>
+        flat binary loaded at FFFF:0000 from reset state — Reset replays it from the start
+      </p>
+    </section>
+  );
+}
+
 function Execution({ snapshot }: { snapshot: Snapshot }) {
   const halted = snapshot.halted;
   const lastExecuted = (snapshot.linear_ip - 1) & 0xfffff;
@@ -160,7 +179,7 @@ function MemoryInspector({ snapshot, prev }: PanelProps) {
   }
   return (
     <section className={styles.panel}>
-      <h2>Memory — demo data window</h2>
+      <h2>Memory — data window</h2>
       {rows.map((row, r) => (
         <div key={r} className={styles.memRow}>
           <span className={styles.memAddr}>{hex20(start + r * 16)}</span>
@@ -179,7 +198,9 @@ function MemoryInspector({ snapshot, prev }: PanelProps) {
           })}
         </div>
       ))}
-      <p className={styles.note}>demo data lives at DS:0020 (physical 00020)</p>
+      <p className={styles.note}>
+        fixed window 00010–0002F — the demo program keeps its data at DS:0020
+      </p>
     </section>
   );
 }
@@ -198,9 +219,7 @@ function lastStepRows(snapshot: Snapshot, prev: Snapshot): DiffRow[] {
     }
   }
   if (snapshot.flags !== prev.flags) {
-    const bits = FLAG_INFO.filter(
-      ([bit]) => (prev.flags & bit) !== (snapshot.flags & bit),
-    )
+    const bits = FLAG_INFO.filter(([bit]) => (prev.flags & bit) !== (snapshot.flags & bit))
       .map(([, label]) => label)
       .join(" ");
     rows.push({
@@ -251,7 +270,8 @@ function LastStep({ snapshot, prev }: PanelProps) {
 }
 
 interface ControlsProps {
-  onLoad: () => void;
+  onLoadDemo: () => void;
+  onLoadBinary: (file: File) => void;
   onStep: () => void;
   onReset: () => void;
   busy: boolean;
@@ -259,10 +279,33 @@ interface ControlsProps {
   halted: boolean;
 }
 
-function Controls({ onLoad, onStep, onReset, busy, hasProgram, halted }: ControlsProps) {
+function Controls({
+  onLoadDemo,
+  onLoadBinary,
+  onStep,
+  onReset,
+  busy,
+  hasProgram,
+  halted,
+}: ControlsProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pickFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file !== undefined) onLoadBinary(file);
+    e.target.value = "";
+  };
   return (
     <div className={styles.controls}>
-      <button onClick={onLoad}>Load</button>
+      <button onClick={onLoadDemo}>Load demo</button>
+      <button onClick={() => fileInputRef.current?.click()}>Load binary…</button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".bin"
+        className={styles.fileInput}
+        data-testid="binary-input"
+        onChange={pickFile}
+      />
       <button onClick={onStep} disabled={busy || !hasProgram || halted}>
         Step
       </button>
@@ -293,6 +336,7 @@ export {
   Halted,
   LastStep,
   MemoryInspector,
+  Program,
   Registers,
   ErrorLine,
 };

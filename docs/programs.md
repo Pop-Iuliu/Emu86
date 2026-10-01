@@ -9,7 +9,9 @@ NASM is invoked with `-O0` so `add ax, imm` assembles to the canonical
 `05 iw` form rather than the r/m form `83 /0`.
 
 Binaries (`.bin`) are committed flat images loaded at reset state
-`CS:IP = FFFF:0000` (physical `0xFFFF0`). CI assembles every `.asm` with
+`CS:IP = FFFF:0000` (physical `0xFFFF0`). The browser **Load binary…** control accepts the
+same layout: any non-empty flat image up to 1 MiB, loaded at `FFFF:0000` from reset state
+(see README → "Loading a program"). CI assembles every `.asm` with
 `just asm` and fails if a committed `.bin` differs (`git diff`), proving the
 sources and binaries never drift.
 

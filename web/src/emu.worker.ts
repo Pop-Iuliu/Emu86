@@ -1,9 +1,23 @@
 import init, { demo_program, Emu86 } from "./wasm/emu86_wasm.js";
-import { RESET_SEG, RESET_OFF } from "./protocol";
+import {
+  MAX_PROGRAM_BYTES,
+  RESET_SEG,
+  RESET_OFF,
+  type ProgramInfo,
+  type Request,
+} from "./protocol";
 
 const ctx = self as unknown as Worker;
 
+const DEMO_NAME = "memory.bin";
+
+interface LoadedProgram {
+  name: string;
+  bytes: Uint8Array;
+}
+
 let emu: Emu86 | null = null;
+let program: LoadedProgram | null = null;
 
 const ready = async () => {
   await init();
@@ -11,16 +25,42 @@ const ready = async () => {
   return emu;
 };
 
-const reply = (snapshot: unknown) => ctx.postMessage({ ok: true, snapshot });
+const programInfo = (): ProgramInfo | null =>
+  program === null
+    ? null
+    : { name: program.name, size: program.bytes.length, seg: RESET_SEG, off: RESET_OFF };
+
+const reply = (snapshot: unknown) =>
+  ctx.postMessage({ ok: true, snapshot, program: programInfo() });
 const fail = (error: string) => ctx.postMessage({ ok: false, error });
 
+const resetAndLoad = (emu: Emu86) => {
+  emu.reset();
+  if (program !== null) reply(emu.load(RESET_SEG, RESET_OFF, program.bytes));
+  else reply(emu.reset());
+};
+
 ctx.onmessage = async (e: MessageEvent) => {
-  const req = e.data as { type: string };
+  const req = e.data as Request;
   const emu = await ready();
   switch (req.type) {
     case "load":
-      emu.reset();
-      reply(emu.load(RESET_SEG, RESET_OFF, demo_program()));
+      program = { name: DEMO_NAME, bytes: demo_program() };
+      resetAndLoad(emu);
+      break;
+    case "loadBinary":
+      if (req.bytes.length === 0) {
+        fail("program file is empty — nothing to load");
+        break;
+      }
+      if (req.bytes.length > MAX_PROGRAM_BYTES) {
+        fail(
+          `program file is ${req.bytes.length} bytes — the 8086 address space holds at most ${MAX_PROGRAM_BYTES}`,
+        );
+        break;
+      }
+      program = { name: req.name, bytes: req.bytes };
+      resetAndLoad(emu);
       break;
     case "step":
       try {
@@ -30,7 +70,7 @@ ctx.onmessage = async (e: MessageEvent) => {
       }
       break;
     case "reset":
-      reply(emu.reset());
+      resetAndLoad(emu);
       break;
   }
 };
