@@ -96,6 +96,31 @@ impl Cpu {
                 self.regs.set_reg(Reg16::Ax, r);
                 self.set_flag_bits(f);
             }
+            0x3D => {
+                let imm = self.fetch16();
+                let (_, f) = alu::sub(self.regs.reg(Reg16::Ax), imm);
+                self.set_flag_bits(f);
+            }
+            0x74 => {
+                let disp = self.fetch8() as i8 as u16;
+                if self.flags.get(Flags::ZF) {
+                    self.ip = self.ip.wrapping_add(disp);
+                }
+            }
+            0x75 => {
+                let disp = self.fetch8() as i8 as u16;
+                if !self.flags.get(Flags::ZF) {
+                    self.ip = self.ip.wrapping_add(disp);
+                }
+            }
+            0xE9 => {
+                let disp = self.fetch16();
+                self.ip = self.ip.wrapping_add(disp);
+            }
+            0xEB => {
+                let disp = self.fetch8() as i8 as u16;
+                self.ip = self.ip.wrapping_add(disp);
+            }
             0xF4 => self.halted = true,
             op => return Err(StepError::UnknownOpcode(op)),
         }
@@ -104,27 +129,23 @@ impl Cpu {
 
     fn alu_rm_imm(&mut self, start: u16, op: u8) -> Result<(), StepError> {
         let modrm = self.fetch8();
-        match (modrm >> 3) & 0b111 {
-            0 => {
+        let alu_op = (modrm >> 3) & 0b111;
+        match alu_op {
+            0 | 5 | 7 => {
                 let dst = self.decode_rm(modrm, true);
                 let imm = if op == 0x81 {
                     self.fetch16()
                 } else {
                     self.fetch8() as i8 as u16
                 };
-                let (r, f) = alu::add(dst.read(&self.regs, &self.mem), imm);
-                dst.write(&mut self.regs, &mut self.mem, r);
-                self.set_flag_bits(f);
-            }
-            5 => {
-                let dst = self.decode_rm(modrm, true);
-                let imm = if op == 0x81 {
-                    self.fetch16()
-                } else {
-                    self.fetch8() as i8 as u16
+                let a = dst.read(&self.regs, &self.mem);
+                let (r, f) = match alu_op {
+                    0 => alu::add(a, imm),
+                    _ => alu::sub(a, imm),
                 };
-                let (r, f) = alu::sub(dst.read(&self.regs, &self.mem), imm);
-                dst.write(&mut self.regs, &mut self.mem, r);
+                if alu_op != 7 {
+                    dst.write(&mut self.regs, &mut self.mem, r);
+                }
                 self.set_flag_bits(f);
             }
             _ => return Err(self.unsupported_form(start)),
@@ -280,6 +301,147 @@ mod tests {
         assert!(cpu.flags.get(Flags::CF));
         assert!(cpu.flags.get(Flags::SF));
         assert!(!cpu.flags.get(Flags::OF));
+    }
+
+    #[test]
+    fn cmp_ax_imm_sets_flags_and_keeps_ax() {
+        let mut cpu = cpu_with(&[0x3D, 0x01, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 1);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 1);
+        assert!(cpu.flags.get(Flags::ZF));
+        assert_eq!(cpu.ip, RESET_OFF + 3);
+    }
+
+    #[test]
+    fn cmp_ax_imm_reports_borrow() {
+        let mut cpu = cpu_with(&[0x3D, 0x01, 0x00]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0);
+        assert!(cpu.flags.get(Flags::CF));
+        assert!(cpu.flags.get(Flags::SF));
+        assert!(!cpu.flags.get(Flags::ZF));
+    }
+
+    #[test]
+    fn cmp_rm16_imm16_keeps_operand() {
+        let mut cpu = cpu_with(&[0x81, 0xF9, 0x01, 0x00]);
+        cpu.regs.set_reg(Reg16::Cx, 1);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 1);
+        assert!(cpu.flags.get(Flags::ZF));
+        assert_eq!(cpu.ip, RESET_OFF + 4);
+    }
+
+    #[test]
+    fn cmp_rm16_imm16_memory_form_reuses_decoder() {
+        let mut cpu = cpu_with(&[0x81, 0x3F, 0x34, 0x12]);
+        cpu.regs.set_reg(Reg16::Bx, 0x0010);
+        cpu.mem.write_word(0x0010, 0x1234);
+        cpu.step().unwrap();
+        assert_eq!(cpu.mem.read_word(0x0010), 0x1234);
+        assert!(cpu.flags.get(Flags::ZF));
+    }
+
+    #[test]
+    fn cmp_rm16_imm8_sign_extends_immediate() {
+        let mut cpu = cpu_with(&[0x83, 0xFF, 0xFF]);
+        cpu.regs.set_reg(Reg16::Di, 0x0100);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Di), 0x0100);
+        assert!(cpu.flags.get(Flags::CF));
+    }
+
+    #[test]
+    fn cmp_rm16_imm8_positive_compares_directly() {
+        let mut cpu = cpu_with(&[0x83, 0xFF, 0x01]);
+        cpu.regs.set_reg(Reg16::Di, 1);
+        cpu.step().unwrap();
+        assert!(cpu.flags.get(Flags::ZF));
+        assert!(!cpu.flags.get(Flags::CF));
+    }
+
+    #[test]
+    fn jmp_short_moves_relative_both_ways() {
+        let mut cpu = cpu_with(&[0xEB, 0x02, 0x90, 0x90, 0xEB, 0xFC]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, RESET_OFF + 4);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, RESET_OFF + 2);
+    }
+
+    #[test]
+    fn jmp_short_disp8_boundaries() {
+        let mut cpu = cpu_with(&[0xEB, 0x7F]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, RESET_OFF + 2 + 0x7F);
+        let mut cpu = cpu_with(&[0xEB, 0x80]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0xFF82);
+    }
+
+    #[test]
+    fn jmp_near_uses_disp16() {
+        let mut cpu = cpu_with(&[0xE9, 0x34, 0x12]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x1237);
+    }
+
+    #[test]
+    fn jump_target_wraps_ip_16bit() {
+        let mut cpu = Cpu::new();
+        cpu.regs.set_seg(Seg::Cs, 0);
+        cpu.mem.load(0xFFF0, &[0xE9, 0xFF, 0x7F]);
+        cpu.ip = 0xFFF0;
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x7FF2);
+    }
+
+    #[test]
+    fn je_taken_when_zf_set() {
+        let mut cpu = cpu_with(&[0x3D, 0x00, 0x00, 0x74, 0x02, 0x90]);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, RESET_OFF + 7);
+    }
+
+    #[test]
+    fn je_untaken_when_zf_clear() {
+        let mut cpu = cpu_with(&[0xB8, 0x01, 0x00, 0x3D, 0x00, 0x00, 0x74, 0x02]);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert!(!cpu.flags.get(Flags::ZF));
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, RESET_OFF + 8);
+    }
+
+    #[test]
+    fn jne_taken_when_zf_clear() {
+        let mut cpu = cpu_with(&[0xB8, 0x01, 0x00, 0x3D, 0x00, 0x00, 0x75, 0x02]);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, RESET_OFF + 10);
+    }
+
+    #[test]
+    fn jne_untaken_when_zf_set() {
+        let mut cpu = cpu_with(&[0x3D, 0x00, 0x00, 0x75, 0x02]);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, RESET_OFF + 5);
+    }
+
+    #[test]
+    fn jumps_leave_flags_unchanged() {
+        let mut cpu = cpu_with(&[0x3D, 0x01, 0x00, 0xEB, 0x00, 0x74, 0x00, 0x75, 0x00]);
+        cpu.step().unwrap();
+        let before = cpu.flags.bits();
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, RESET_OFF + 9);
+        assert_eq!(cpu.flags.bits(), before);
     }
 
     #[test]

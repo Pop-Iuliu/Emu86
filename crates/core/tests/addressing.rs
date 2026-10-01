@@ -400,8 +400,8 @@ fn unsupported_group_extension_reports_ip_and_bytes() {
 }
 
 #[test]
-fn group1_extensions_other_than_add_and_sub_are_unsupported() {
-    for reg in [1u8, 2, 3, 4, 6, 7] {
+fn group1_extensions_other_than_add_sub_cmp_are_unsupported() {
+    for reg in [1u8, 2, 3, 4, 6] {
         let modrm = 0b11_000_000 | (reg << 3);
         let mut cpu = loaded(&[0x81, modrm, 0x00, 0x00]);
         assert_eq!(

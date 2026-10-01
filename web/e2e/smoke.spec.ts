@@ -76,6 +76,23 @@ test("load a raw .bin, execute it, and replay after reset without reselecting th
   await expect(page.getByTestId("reg-ax")).toHaveText(/AX.*FFFF/);
 });
 
+test("flags drive a counted loop loaded from a raw .bin", async ({ page }) => {
+  await page.goto("/");
+  await page.setInputFiles(`[data-testid="binary-input"]`, programBin("loop.bin"));
+  await expect(page.getByTestId("program-info")).toHaveText(/loop\.bin.*20 bytes.*FFFF:0000/);
+  await expect(page.getByTestId("reg-ax")).toHaveText(/AX.*0000/);
+
+  for (let i = 0; i < 15; i++) {
+    await page.getByRole("button", { name: "Step" }).click();
+  }
+
+  await expect(page.getByTestId("reg-ax")).toHaveText(/AX.*0006/);
+  await expect(page.getByTestId("reg-cx")).toHaveText(/CX.*0000/);
+  await expect(page.getByText("FLAGS = F046")).toBeVisible();
+  await expect(page.getByTestId("halted")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Step" })).toBeDisabled();
+});
+
 test("invalid binaries are rejected and keep the current program", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Load demo" }).click();

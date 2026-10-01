@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core: `CMP` — `CMP AX, imm16` (`3D`), `CMP r/m16, imm16` (`81 /7`) and
+  `CMP r/m16, imm8` (`83 /7`, sign-extended immediate) reuse the operand
+  decoder and update the arithmetic flags without writing the operand.
+- Core: relative jumps — `JMP short` (`EB`, signed disp8), `JMP near`
+  (`E9`, disp16), `JE/JZ short` (`74`) and `JNE/JNZ short` (`75`); targets
+  are computed from IP after the instruction bytes are fetched and wrap at
+  16 bits; jumps leave flags unchanged.
+- Tests: `loop` program — a counted loop whose back-edge is `JNE` on
+  `CMP CX, 0`, proving flags decide whether execution repeats or continues
+  forward (core suite + Playwright e2e stepping it through the browser UI).
 - Web: **Load binary…** — open a raw flat `.bin` (NASM `-f bin` output) and
   run it in the debugger; size-validated (non-empty, ≤ 1 MiB) before it
   replaces the current program, with the filename, byte count and load

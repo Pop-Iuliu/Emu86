@@ -2,9 +2,10 @@
 
 Each `.asm` is restricted to `cpu 8086` (NASM rejects 386+ mnemonics) and to
 the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
-`ADD/SUB r/m16, imm` (`81 /0`, `81 /5`, `83 /0`, `83 /5`), `MOV` between
-r/m and reg for byte and word (`88`–`8B`), `ADD AX, imm16` (`05 iw`),
-`SUB AX, imm16` (`2D iw`), `HLT` (`F4`).
+`ADD/SUB/CMP r/m16, imm` (`81 /0`, `81 /5`, `81 /7`, `83 /0`, `83 /5`,
+`83 /7`), `MOV` between r/m and reg for byte and word (`88`–`8B`),
+`ADD AX, imm16` (`05 iw`), `SUB/CMP AX, imm16` (`2D iw`, `3D iw`),
+`JMP short/near` (`EB`, `E9`), `JE/JNE short` (`74`/`75`), `HLT` (`F4`).
 NASM is invoked with `-O0` so `add ax, imm` assembles to the canonical
 `05 iw` form rather than the r/m form `83 /0`.
 
@@ -28,6 +29,7 @@ always read as 1).
 | `underflow`   | subtraction underflow      | `FFFF`     | `F097`      | `0-1` borrows: CF set (borrow), SF set, OF clear (−1 is representable), AF set                       |
 | `wrap`        | 1 MiB fetch/load wrapping  | `1234`     | `F002`      | program's last 3 bytes straddle `0xFFFFF`→`0x0`; 8086 has no A20 gate, addresses wrap (see ADR-0001)  |
 | `memory`      | browser demo + RAM roundtrip | `BEEF`     | `F093`      | `0xBEEF` stored at `DS:0020`, `+0x1111` → `0xD000`, `byte -1` sign-extends to `0xFFFF` → borrow; result loaded into `CX` = `0xD001` |
+| `loop`        | flags drive a counted loop   | `0006`     | `F046`      | 3× `add ax, 2` / `sub cx, 1` / `cmp cx, 0` with a `jne top` back-edge; the final `cmp` sets ZF, so `jne` falls through to `hlt` — flags decide repeat vs continue |
 
 `wrap` byte layout: 16 bytes fill `0xFFFF0..0xFFFFF` exactly; the
 immediate of `MOV AX, 0x1234` and the `HLT` wrap to `0x0000..0x0001`.

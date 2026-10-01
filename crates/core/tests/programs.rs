@@ -46,7 +46,15 @@ fn run_program(bin: &[u8]) -> Cpu {
 
 #[test]
 fn programs_match_expected_results() {
-    for name in ["arith", "carry", "overflow", "underflow", "wrap", "memory"] {
+    for name in [
+        "arith",
+        "carry",
+        "overflow",
+        "underflow",
+        "wrap",
+        "memory",
+        "loop",
+    ] {
         let bin = std::fs::read(format!("{PROGRAM_DIR}/{name}.bin")).unwrap();
         let expected = std::fs::read_to_string(format!("{PROGRAM_DIR}/{name}.expected")).unwrap();
         let e = parse_expected(&expected);
@@ -72,7 +80,15 @@ fn wrap_program_fetches_across_one_mebibyte_boundary() {
 
 #[test]
 fn replay_produces_identical_results() {
-    for name in ["arith", "carry", "overflow", "underflow", "wrap", "memory"] {
+    for name in [
+        "arith",
+        "carry",
+        "overflow",
+        "underflow",
+        "wrap",
+        "memory",
+        "loop",
+    ] {
         let bin = std::fs::read(format!("{PROGRAM_DIR}/{name}.bin")).unwrap();
 
         let mut cpu = Cpu::new();
