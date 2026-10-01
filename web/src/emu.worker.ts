@@ -9,7 +9,7 @@ import {
 
 const ctx = self as unknown as Worker;
 
-const DEMO_NAME = "memory.bin";
+const DEMO_NAME = "countdown.bin";
 
 interface LoadedProgram {
   name: string;

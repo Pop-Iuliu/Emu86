@@ -1,6 +1,6 @@
 #![allow(clippy::panic)]
 
-use emu86_core::{Cpu, Reg16, StepError};
+use emu86_core::{Cpu, Flags, Reg16, StepError};
 
 const PROGRAM_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/programs");
 const MAX_STEPS: usize = 64;
@@ -54,6 +54,7 @@ fn programs_match_expected_results() {
         "wrap",
         "memory",
         "loop",
+        "countdown",
     ] {
         let bin = std::fs::read(format!("{PROGRAM_DIR}/{name}.bin")).unwrap();
         let expected = std::fs::read_to_string(format!("{PROGRAM_DIR}/{name}.expected")).unwrap();
@@ -88,6 +89,7 @@ fn replay_produces_identical_results() {
         "wrap",
         "memory",
         "loop",
+        "countdown",
     ] {
         let bin = std::fs::read(format!("{PROGRAM_DIR}/{name}.bin")).unwrap();
 
@@ -147,6 +149,77 @@ fn memory_program_uses_planned_encodings() {
     assert_eq!(&bin[15..17], &[0x8B, 0x0F]);
     assert_eq!(bin[17], 0xF4);
     assert_eq!(bin.len(), 18);
+}
+
+#[test]
+fn countdown_program_uses_planned_encodings() {
+    let bin = std::fs::read(format!("{PROGRAM_DIR}/countdown.bin")).unwrap();
+    assert_eq!(&bin[0..3], &[0xBB, 0x20, 0x00]);
+    assert_eq!(&bin[3..6], &[0xB8, 0x03, 0x00]);
+    assert_eq!(&bin[6..9], &[0xB9, 0xFF, 0xFF]);
+    assert_eq!(&bin[9..11], &[0x89, 0x07]);
+    assert_eq!(&bin[11..14], &[0x83, 0x2F, 0x01]);
+    assert_eq!(&bin[14..17], &[0x83, 0x3F, 0x00]);
+    assert_eq!(&bin[17..19], &[0x75, 0xF8]);
+    assert_eq!(&bin[19..21], &[0x8B, 0x0F]);
+    assert_eq!(bin[21], 0xF4);
+    assert_eq!(bin.len(), 22);
+}
+
+#[test]
+fn countdown_program_hits_checkpoints() {
+    let bin = std::fs::read(format!("{PROGRAM_DIR}/countdown.bin")).unwrap();
+    let mut cpu = Cpu::new();
+    cpu.load_flat(0xFFFF, 0x0000, &bin);
+
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x0003);
+    assert_eq!(cpu.regs.reg(Reg16::Bx), 0x0020);
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x0006);
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0003);
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x0009);
+    assert_eq!(cpu.regs.reg(Reg16::Cx), 0xFFFF);
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x000B);
+    assert_eq!(cpu.mem.read_word(0x0020), 0x0003);
+    assert_eq!(cpu.flags.bits(), 0xF002);
+
+    for remaining in [2u16, 1] {
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x000E, "sub at countdown");
+        assert_eq!(cpu.mem.read_word(0x0020), remaining);
+        assert_eq!(cpu.flags.bits(), 0xF002);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x0011, "cmp at countdown");
+        assert_eq!(cpu.flags.bits(), 0xF002);
+        assert!(!cpu.flags.get(Flags::ZF));
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x000B, "jne taken back to countdown");
+    }
+
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x000E);
+    assert_eq!(cpu.mem.read_word(0x0020), 0x0000);
+    assert_eq!(cpu.flags.bits(), 0xF046);
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x0011);
+    assert_eq!(cpu.flags.bits(), 0xF046);
+    assert!(cpu.flags.get(Flags::ZF));
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x0013, "jne falls through on ZF");
+
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x0015);
+    assert_eq!(cpu.regs.reg(Reg16::Cx), 0x0000);
+    assert_eq!(cpu.regs.reg(Reg16::Bx), 0x0020);
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0003);
+    assert_eq!(cpu.mem.read_word(0x0020), 0x0000);
+    cpu.step().unwrap();
+    assert!(cpu.halted);
+    assert_eq!(cpu.ip, 0x0016);
+    assert_eq!(cpu.flags.bits(), 0xF046);
 }
 
 #[test]

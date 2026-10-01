@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tests: `countdown` — the shared terminating-loop demonstration. One
+  fixture (NASM source + committed binary) drives the core integration
+  tests and, via `demo_program()`, the browser demo: `AX` supplies 3,
+  memory at `DS:0020` counts 3→2→1→0 through `83 /5`, the `83 /7` compare
+  raises ZF, the backward `75` branch exits, and `CX` (sentinel `FFFF`)
+  receives the final 0. Checkpoint test records ip, memory word and FLAGS
+  at every step, pins the `83 /5`, `83 /7` and backward-branch encodings,
+  asserts the branch is taken exactly twice, and replay determinism
+  re-runs it from reset.
 - Core: `CMP` — `CMP AX, imm16` (`3D`), `CMP r/m16, imm16` (`81 /7`) and
   `CMP r/m16, imm8` (`83 /7`, sign-extended immediate) reuse the operand
   decoder and update the arithmetic flags without writing the operand.

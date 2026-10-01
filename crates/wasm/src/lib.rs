@@ -83,7 +83,7 @@ pub struct Emu86 {
 
 #[wasm_bindgen]
 pub fn demo_program() -> Vec<u8> {
-    include_bytes!("../../../tests/programs/memory.bin").to_vec()
+    include_bytes!("../../../tests/programs/countdown.bin").to_vec()
 }
 
 #[wasm_bindgen]

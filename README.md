@@ -35,8 +35,8 @@ The debugger runs raw flat binaries — NASM output, no headers, no relocations:
 nasm -O0 -f bin -o prog.bin prog.asm
 ```
 
-- **Load demo** embeds the shared `memory` demo (`tests/programs/memory.bin`)
-  and is the quickest way to start.
+- **Load demo** embeds the shared `countdown` demo
+  (`tests/programs/countdown.bin`) and is the quickest way to start.
 - **Load binary…** opens any `.bin` and runs it in the debugger.
 
 Loading convention: the image is copied verbatim at `FFFF:0000` (physical
