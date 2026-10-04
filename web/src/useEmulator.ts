@@ -35,8 +35,11 @@ export function useEmulator(): EmulatorState {
         setBatch(res.batch);
         setError(null);
       } else {
+        // The worker reports the status that survived the failure: a rejected
+        // load keeps the previous program and its status, so the debugger
+        // stays usable; a failed step or run reports "error".
         setError(res.error);
-        setStatus("error");
+        setStatus(res.status);
       }
     };
     return () => worker.terminate();

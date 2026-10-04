@@ -48,6 +48,12 @@ export interface Response {
 export interface ErrorResponse {
   ok: false;
   error: string;
+  /**
+   * Status after the failure. A rejected load changes nothing, so it reports
+   * the status the CPU is actually in ("paused" / "running" / "halted"); a
+   * failed step or run reports "error".
+   */
+  status: ExecStatus;
 }
 
 export type AnyResponse = Response | ErrorResponse;

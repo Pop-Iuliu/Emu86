@@ -42,7 +42,18 @@ const programInfo = (): ProgramInfo | null =>
 
 const reply = (snapshot: unknown, status: ExecStatus, batch: boolean) =>
   ctx.postMessage({ ok: true, snapshot, program: programInfo(), status, batch });
-const fail = (error: string) => ctx.postMessage({ ok: false, error });
+
+// Report a failure without discarding state the guest still owns. A rejected
+// load leaves the loaded program untouched, so the status it reports is the
+// one the CPU is actually in; only a failed step or run reports "error".
+const fail = (error: string, status: ExecStatus) =>
+  ctx.postMessage({ ok: false, error, status });
+
+// Ask the source of truth rather than tracking a second copy of it.
+const currentStatus = (emu: Emu86): ExecStatus => {
+  if (running) return "running";
+  return (emu.view() as unknown as Snapshot).halted ? "halted" : "paused";
+};
 
 const resetAndLoad = (emu: Emu86) => {
   emu.reset();
@@ -63,7 +74,7 @@ const runBatch = () => {
 
   if (result.outcome === "error") {
     running = false;
-    fail(result.error ?? "execution error");
+    fail(result.error ?? "execution error", "error");
     return;
   }
   if (result.outcome === "halted") {
@@ -87,12 +98,13 @@ ctx.onmessage = async (e: MessageEvent) => {
       break;
     case "loadBinary":
       if (req.bytes.length === 0) {
-        fail("program file is empty — nothing to load");
+        fail("program file is empty — nothing to load", currentStatus(emu));
         break;
       }
       if (req.bytes.length > MAX_PROGRAM_BYTES) {
         fail(
           `program file is ${req.bytes.length} bytes — the 8086 address space holds at most ${MAX_PROGRAM_BYTES}`,
+          currentStatus(emu),
         );
         break;
       }
@@ -106,7 +118,7 @@ ctx.onmessage = async (e: MessageEvent) => {
         const snapshot = emu.step() as unknown as Snapshot;
         reply(snapshot, snapshot.halted ? "halted" : "paused", false);
       } catch (err) {
-        fail(String(err));
+        fail(String(err), "error");
       }
       break;
     case "run":
