@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Web: **Run** and **Pause** — bounded execution in a Web Worker. The
+  emulator runs instructions in small batches (`run_batch(1024)`) and
+  yields between batches, so Pause and Reset stay responsive against a
+  program that never halts (`EB FE`); execution stops on HLT, an
+  execution error, or the instruction budget, and one coherent snapshot
+  is published per batch. The status distinguishes **running**,
+  **paused**, **halted** and **error**; batched comparisons are labelled
+  "Changes since last update" while "Last step" is reserved for single
+  stepping; Run/Pause/Step keep keyboard operation and visible focus.
+- WASM: bounded batch execution — `run_batch(max_steps)` runs until HLT,
+  an error, or the budget and reports why it stopped
+  (`budget`/`halted`/`error`). The loop is factored into a pure-Rust
+  `run_steps` so it is testable without a JS host; unit tests cover the
+  `EB FE` infinite loop, an empty budget, reaching HLT, HLT winning over
+  an exhausted budget, and an unhandled opcode.
 - Tests: `countdown` — the shared terminating-loop demonstration. One
   fixture (NASM source + committed binary) drives the core integration
   tests and, via `demo_program()`, the browser demo: `AX` supplies 3,
