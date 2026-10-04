@@ -210,7 +210,10 @@ mod tests {
         let (outcome, error) = run_steps(&mut cpu, 5);
         assert_eq!(outcome, BatchOutcome::Budget);
         assert!(error.is_none());
-        assert!(!cpu.halted, "the guest is still runnable; only this batch ended");
+        assert!(
+            !cpu.halted,
+            "the guest is still runnable; only this batch ended"
+        );
     }
 
     #[test]
