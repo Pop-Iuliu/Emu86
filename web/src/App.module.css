@@ -23,15 +23,38 @@
   cursor: default;
 }
 
+.controls button[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .controls button:focus-visible {
   outline: 2px solid #ffcf3f;
   outline-offset: 2px;
 }
 
-.busy {
+.status {
   font-style: italic;
   opacity: 0.6;
   align-self: center;
+}
+
+.status[data-status="running"] {
+  opacity: 1;
+  font-style: normal;
+  color: #7fd1ff;
+}
+
+.status[data-status="halted"] {
+  opacity: 1;
+  font-style: normal;
+  color: #ffcf3f;
+}
+
+.status[data-status="error"] {
+  opacity: 1;
+  font-style: normal;
+  color: #ff7b6b;
 }
 
 .fileInput {

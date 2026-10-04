@@ -1,6 +1,13 @@
 import { useRef, type ChangeEvent } from "react";
 import styles from "./App.module.css";
-import { hex8, hex16, hex20, type ProgramInfo, type Snapshot } from "./protocol";
+import {
+  hex8,
+  hex16,
+  hex20,
+  type ExecStatus,
+  type ProgramInfo,
+  type Snapshot,
+} from "./protocol";
 
 const WORD_REGS = [
   ["ax", "AX"],
@@ -31,6 +38,13 @@ const FLAG_INFO = [
   [0x0400, "DF", "Direction — string operations run backward"],
   [0x0800, "OF", "Overflow — signed result out of range"],
 ] as const;
+
+const STATUS_LABEL: Record<ExecStatus, string> = {
+  paused: "paused",
+  running: "running",
+  halted: "halted",
+  error: "error",
+};
 
 interface PanelProps {
   snapshot: Snapshot;
@@ -240,17 +254,22 @@ function lastStepRows(snapshot: Snapshot, prev: Snapshot): DiffRow[] {
   return rows;
 }
 
-function LastStep({ snapshot, prev }: PanelProps) {
+function LastStep({ snapshot, prev, batch }: PanelProps & { batch: boolean }) {
   const rows = prev === null ? [] : lastStepRows(snapshot, prev);
+  const title = batch ? "Changes since last update" : "Last step";
   const note =
     prev === null
-      ? "Step to see what changed. Load and reset clear this list."
+      ? batch
+        ? "Run to see what changed. Load and reset clear this list."
+        : "Step to see what changed. Load and reset clear this list."
       : rows.length === 0
-        ? "No displayed values changed by that step."
+        ? batch
+          ? "No displayed values changed since the last update."
+          : "No displayed values changed by that step."
         : null;
   return (
     <section className={styles.panel}>
-      <h2>Last step</h2>
+      <h2>{title}</h2>
       {note !== null ? (
         <p className={styles.note}>{note}</p>
       ) : (
@@ -273,20 +292,22 @@ interface ControlsProps {
   onLoadDemo: () => void;
   onLoadBinary: (file: File) => void;
   onStep: () => void;
+  onRun: () => void;
+  onPause: () => void;
   onReset: () => void;
-  busy: boolean;
+  status: ExecStatus;
   hasProgram: boolean;
-  halted: boolean;
 }
 
 function Controls({
   onLoadDemo,
   onLoadBinary,
   onStep,
+  onRun,
+  onPause,
   onReset,
-  busy,
+  status,
   hasProgram,
-  halted,
 }: ControlsProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFile = (e: ChangeEvent<HTMLInputElement>) => {
@@ -294,6 +315,25 @@ function Controls({
     if (file !== undefined) onLoadBinary(file);
     e.target.value = "";
   };
+
+  const paused = status === "paused";
+  const canStep = hasProgram && paused;
+  const canRun = hasProgram && paused;
+  const canPause = hasProgram && status === "running";
+
+  // Guard the actions here rather than relying on native `disabled`, so the
+  // focused button is never disabled out from under a keyboard user. Native
+  // `disabled` is used only before a program exists.
+  const step = () => {
+    if (canStep) onStep();
+  };
+  const run = () => {
+    if (canRun) onRun();
+  };
+  const pause = () => {
+    if (canPause) onPause();
+  };
+
   return (
     <div className={styles.controls}>
       <button onClick={onLoadDemo}>Load demo</button>
@@ -306,13 +346,29 @@ function Controls({
         data-testid="binary-input"
         onChange={pickFile}
       />
-      <button onClick={onStep} disabled={busy || !hasProgram || halted}>
+      <button onClick={step} disabled={!hasProgram} aria-disabled={!canStep}>
         Step
       </button>
-      <button onClick={onReset} disabled={busy || !hasProgram}>
+      <button onClick={run} disabled={!hasProgram} aria-disabled={!canRun}>
+        Run
+      </button>
+      <button onClick={pause} disabled={!hasProgram} aria-disabled={!canPause}>
+        Pause
+      </button>
+      <button onClick={onReset} disabled={!hasProgram}>
         Reset
       </button>
-      {busy && <span className={styles.busy}>working…</span>}
+      {hasProgram && (
+        <span
+          className={styles.status}
+          data-testid="status"
+          data-status={status}
+          role="status"
+          aria-live="polite"
+        >
+          {STATUS_LABEL[status]}
+        </span>
+      )}
     </div>
   );
 }

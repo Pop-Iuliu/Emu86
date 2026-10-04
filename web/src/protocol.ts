@@ -27,21 +27,33 @@ export interface ProgramInfo {
   off: number;
 }
 
+export type ExecStatus = "paused" | "running" | "halted" | "error";
+
 export type Request =
   | { type: "load" }
   | { type: "loadBinary"; name: string; bytes: Uint8Array }
   | { type: "step" }
+  | { type: "run" }
+  | { type: "pause" }
   | { type: "reset" };
 
 export interface Response {
   ok: true;
   snapshot: Snapshot;
   program: ProgramInfo | null;
+  status: ExecStatus;
+  batch: boolean;
 }
 
 export interface ErrorResponse {
   ok: false;
   error: string;
+  /**
+   * Status after the failure. A rejected load changes nothing, so it reports
+   * the status the CPU is actually in ("paused" / "running" / "halted"); a
+   * failed step or run reports "error".
+   */
+  status: ExecStatus;
 }
 
 export type AnyResponse = Response | ErrorResponse;
@@ -53,3 +65,6 @@ export const hex20 = (v: number): string => v.toString(16).toUpperCase().padStar
 export const RESET_SEG = 0xffff;
 export const RESET_OFF = 0x0000;
 export const MAX_PROGRAM_BYTES = 0x100000;
+
+/** Instructions executed per worker batch before the worker yields to the event loop. */
+export const RUN_BATCH_STEPS = 1024;
