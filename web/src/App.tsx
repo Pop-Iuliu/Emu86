@@ -14,7 +14,7 @@ import {
 import styles from "./App.module.css";
 
 export default function App() {
-  const { snapshot, prev, program, error, busy, send } = useEmulator();
+  const { snapshot, prev, program, error, status, batch, send } = useEmulator();
   const hasProgram = snapshot !== null;
 
   const loadBinary = useCallback(
@@ -33,10 +33,11 @@ export default function App() {
         onLoadDemo={() => send({ type: "load" })}
         onLoadBinary={loadBinary}
         onStep={() => send({ type: "step" })}
+        onRun={() => send({ type: "run" })}
+        onPause={() => send({ type: "pause" })}
         onReset={() => send({ type: "reset" })}
-        busy={busy}
+        status={status}
         hasProgram={hasProgram}
-        halted={snapshot?.halted === true}
       />
       {snapshot !== null && (
         <>
@@ -46,7 +47,7 @@ export default function App() {
           <Registers snapshot={snapshot} prev={prev} />
           <Flags snapshot={snapshot} prev={prev} />
           <MemoryInspector snapshot={snapshot} prev={prev} />
-          <LastStep snapshot={snapshot} prev={prev} />
+          <LastStep snapshot={snapshot} prev={prev} batch={batch} />
         </>
       )}
       <ErrorLine error={error} />
