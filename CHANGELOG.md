@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `run_steps` so it is testable without a JS host; unit tests cover the
   `EB FE` infinite loop, an empty budget, reaching HLT, HLT winning over
   an exhausted budget, and an unhandled opcode.
+- Web: the execution panel now tells the movement story — a recorded
+  **Last executed address** (CS:IP with physical, taken from the pre-step
+  state, still shown after HLT instead of the old `linear_ip − 1` guess)
+  next to the **next instruction address**; when a step changes only
+  execution position, the Last step panel says "No register, flag, or
+  visible memory changes. Execution address updated." so a taken backward
+  branch reads as a repeat and the ZF fall-through explains the stop.
 - Tests: `countdown` — the shared terminating-loop demonstration. One
   fixture (NASM source + committed binary) drives the core integration
   tests and, via `demo_program()`, the browser demo: `AX` supplies 3,

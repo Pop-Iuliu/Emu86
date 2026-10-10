@@ -43,7 +43,7 @@ export default function App() {
         <>
           <Halted halted={snapshot.halted} />
           {program !== null && <Program info={program} />}
-          <Execution snapshot={snapshot} />
+          <Execution snapshot={snapshot} prev={prev} />
           <Registers snapshot={snapshot} prev={prev} />
           <Flags snapshot={snapshot} prev={prev} />
           <MemoryInspector snapshot={snapshot} prev={prev} />

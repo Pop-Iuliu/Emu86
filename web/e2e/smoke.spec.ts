@@ -34,9 +34,15 @@ test("smoke: load demo, watch memory count down to zero, observe halt", async ({
 
   await page.getByRole("button", { name: "Step" }).click();
   await expect(page.getByText("FLAGS = F002")).toBeVisible();
+  await expect(page.getByTestId("exec-last")).toHaveText(/FFFF:000E.*FFFFE/);
+  await expect(page.getByTestId("exec-next")).toHaveText(/FFFF:0011.*00001/);
 
   await page.getByRole("button", { name: "Step" }).click();
-  await expect(page.getByText("FFFF:000B")).toBeVisible();
+  await expect(page.getByTestId("exec-last")).toHaveText(/FFFF:0011.*00001/);
+  await expect(page.getByTestId("exec-next")).toHaveText(/FFFF:000B.*FFFFB/);
+  await expect(
+    page.getByText("No register, flag, or visible memory changes. Execution address updated."),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Step" }).click();
   await expect(page.getByTestId("mem-byte-32")).toHaveText("01");
@@ -45,24 +51,28 @@ test("smoke: load demo, watch memory count down to zero, observe halt", async ({
   await expect(page.getByText("FLAGS = F002")).toBeVisible();
 
   await page.getByRole("button", { name: "Step" }).click();
-  await expect(page.getByText("FFFF:000B")).toBeVisible();
+  await expect(page.getByTestId("exec-last")).toHaveText(/FFFF:0011.*00001/);
+  await expect(page.getByTestId("exec-next")).toHaveText(/FFFF:000B.*FFFFB/);
 
   await page.getByRole("button", { name: "Step" }).click();
   await expect(page.getByTestId("mem-byte-32")).toHaveText("00");
   await expect(page.getByText("FLAGS = F046")).toBeVisible();
 
   await page.getByRole("button", { name: "Step" }).click();
-  await expect(page.getByText("FFFF:0011")).toBeVisible();
+  await expect(page.getByTestId("exec-next")).toHaveText(/FFFF:0011.*00001/);
   await expect(page.getByText("FLAGS = F046")).toBeVisible();
 
   await page.getByRole("button", { name: "Step" }).click();
-  await expect(page.getByText("FFFF:0013")).toBeVisible();
+  await expect(page.getByTestId("exec-last")).toHaveText(/FFFF:0011.*00001/);
+  await expect(page.getByTestId("exec-next")).toHaveText(/FFFF:0013.*00003/);
 
   await page.getByRole("button", { name: "Step" }).click();
   await expect(page.getByTestId("reg-cx")).toHaveText(/CX.*0000/);
 
   await page.getByRole("button", { name: "Step" }).click();
   await expect(page.getByTestId("halted")).toBeVisible();
+  await expect(page.getByTestId("exec-last")).toHaveText(/FFFF:0015.*00005/);
+  await expect(page.getByTestId("exec-next")).toHaveText(/FFFF:0016.*00006/);
   await expect(page.getByText(/IP advanced past HLT/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Step" })).toBeDisabled();
 });

@@ -1,10 +1,13 @@
-use emu86_core::{Cpu, Snapshot, StepError};
+use std::collections::BTreeSet;
+
+use emu86_core::{disassemble, Cpu, Reg16, Reg8, RunResult, RunStop, Seg, Snapshot, StepError};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 const DEMO_WINDOW_START: u32 = 0x0010;
 const DEMO_WINDOW_LEN: usize = 32;
 const INSN_WINDOW_LEN: usize = 6;
+const LINEAR_MASK: u32 = 0xF_FFFF;
 
 #[derive(Serialize)]
 struct SnapshotView {
@@ -47,7 +50,7 @@ impl From<&Cpu> for SnapshotView {
             ip,
             flags,
         } = cpu.snapshot();
-        let linear_ip = ((cs as u32) << 4).wrapping_add(ip as u32) & 0xF_FFFF;
+        let linear_ip = ((cs as u32) << 4).wrapping_add(ip as u32) & LINEAR_MASK;
         Self {
             ax,
             cx,
@@ -131,9 +134,58 @@ fn run_steps(cpu: &mut Cpu, max_steps: u32) -> (BatchOutcome, Option<String>) {
     }
 }
 
+#[derive(Serialize)]
+struct RunView {
+    /// `"halted"`, `"step-limit"`, `"breakpoint"` or `"error"`.
+    stop: &'static str,
+    steps: u64,
+    /// Human-readable error, present only when `stop` is `"error"`.
+    error: Option<String>,
+    snapshot: SnapshotView,
+}
+
+impl RunView {
+    fn new(result: RunResult, cpu: &Cpu) -> Self {
+        let (stop, error) = match &result.stop {
+            RunStop::Halted => ("halted", None),
+            RunStop::StepLimit => ("step-limit", None),
+            RunStop::Breakpoint => ("breakpoint", None),
+            RunStop::Error { cs, ip, err } => {
+                let (cs, ip) = (*cs, *ip);
+                let physical = ((cs as u32) << 4).wrapping_add(ip as u32) & LINEAR_MASK;
+                let detail = match err {
+                    StepError::UnknownOpcode(op) => {
+                        format!("unknown opcode {op:#04x} at {cs:#06x}:{ip:#06x} (physical {physical:#07x})")
+                    }
+                    StepError::UnsupportedForm { bytes, .. } => format!(
+                        "unsupported form at {cs:#06x}:{ip:#06x} (physical {physical:#07x}): {bytes:02X?}"
+                    ),
+                    StepError::Halted => "cpu halted mid-run".to_string(),
+                };
+                ("error", Some(detail))
+            }
+        };
+        Self {
+            stop,
+            steps: result.steps,
+            error,
+            snapshot: SnapshotView::from(cpu),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct DisasmView {
+    off: u16,
+    linear: u32,
+    bytes: Vec<u8>,
+    text: String,
+}
+
 #[wasm_bindgen]
 pub struct Emu86 {
     cpu: Cpu,
+    breakpoints: BTreeSet<u32>,
 }
 
 #[wasm_bindgen]
@@ -145,7 +197,10 @@ pub fn demo_program() -> Vec<u8> {
 impl Emu86 {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self { cpu: Cpu::new() }
+        Self {
+            cpu: Cpu::new(),
+            breakpoints: BTreeSet::new(),
+        }
     }
 
     pub fn reset(&mut self) -> JsValue {
@@ -174,6 +229,85 @@ impl Emu86 {
             outcome,
             error,
         };
+        serde_wasm_bindgen::to_value(&view).unwrap_or(JsValue::NULL)
+    }
+
+    /// Executes up to `max_steps` instructions in one call, stopping at HLT,
+    /// a breakpoint or an error. Never throws — the stop reason travels in
+    /// the result so the frontend always receives the freshest state.
+    pub fn run(&mut self, max_steps: u32) -> JsValue {
+        let result = self.cpu.run(max_steps as u64, &self.breakpoints);
+        serde_wasm_bindgen::to_value(&RunView::new(result, &self.cpu)).unwrap_or(JsValue::NULL)
+    }
+
+    /// Reads `len` bytes starting at linear address `addr`, wrapping at the
+    /// 1 MiB boundary the way 8086 addressing does.
+    pub fn read_mem(&self, addr: u32, len: u32) -> Vec<u8> {
+        (0..len)
+            .map(|i| self.cpu.mem.read((addr.wrapping_add(i)) as usize))
+            .collect()
+    }
+
+    /// Writes bytes at linear address `addr`, wrapping at the 1 MiB boundary.
+    pub fn write_mem(&mut self, addr: u32, bytes: &[u8]) {
+        self.cpu.mem.load(addr as usize, bytes);
+    }
+
+    /// Sets a register by lowercase name: `ax..di`, `al..bh`, `es/cs/ss/ds`,
+    /// `ip` or `flags`. Byte-register writes alias the 16-bit words exactly
+    /// like the real CPU. Unknown names are rejected.
+    pub fn set_reg(&mut self, name: &str, value: u16) -> Result<(), JsValue> {
+        if let Some(r) = Reg16::from_name(name) {
+            self.cpu.regs.set_reg(r, value);
+            return Ok(());
+        }
+        if let Some(r) = Reg8::from_name(name) {
+            self.cpu.regs.set_reg8(r, value as u8);
+            return Ok(());
+        }
+        if let Some(s) = Seg::from_name(name) {
+            self.cpu.regs.set_seg(s, value);
+            return Ok(());
+        }
+        match name {
+            "ip" => {
+                self.cpu.ip = value;
+                Ok(())
+            }
+            "flags" => {
+                self.cpu.flags.set_bits(value);
+                Ok(())
+            }
+            _ => Err(format!("unknown register {name:?}").into()),
+        }
+    }
+
+    /// Breakpoints are linear (physical) addresses; a run stops when the
+    /// instruction pointer arrives at one after at least one executed step.
+    pub fn add_breakpoint(&mut self, addr: u32) {
+        self.breakpoints.insert(addr & LINEAR_MASK);
+    }
+
+    pub fn remove_breakpoint(&mut self, addr: u32) {
+        self.breakpoints.remove(&(addr & LINEAR_MASK));
+    }
+
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoints.clear();
+    }
+
+    /// Static listing of up to `max` instructions at `seg`:`off` (capped at
+    /// `MAX_INSNS`). Pure syntax — no register values are folded in.
+    pub fn disasm(&self, seg: u16, off: u16, max: u32) -> JsValue {
+        let view: Vec<DisasmView> = disassemble(&self.cpu.mem, seg, off, max as usize)
+            .into_iter()
+            .map(|i| DisasmView {
+                off: i.off,
+                linear: i.linear,
+                bytes: i.bytes,
+                text: i.text,
+            })
+            .collect();
         serde_wasm_bindgen::to_value(&view).unwrap_or(JsValue::NULL)
     }
 

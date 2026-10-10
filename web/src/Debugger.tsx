@@ -1,13 +1,6 @@
 import { useRef, type ChangeEvent } from "react";
 import styles from "./App.module.css";
-import {
-  hex8,
-  hex16,
-  hex20,
-  type ExecStatus,
-  type ProgramInfo,
-  type Snapshot,
-} from "./protocol";
+import { hex8, hex16, hex20, type ExecStatus, type ProgramInfo, type Snapshot } from "./protocol";
 
 const WORD_REGS = [
   ["ax", "AX"],
@@ -123,14 +116,27 @@ function Program({ info }: { info: ProgramInfo }) {
   );
 }
 
-function Execution({ snapshot }: { snapshot: Snapshot }) {
+function Execution({ snapshot, prev }: PanelProps) {
   const halted = snapshot.halted;
-  const lastExecuted = (snapshot.linear_ip - 1) & 0xfffff;
   return (
     <section className={styles.panel}>
       <h2>{halted ? "Execution — halted" : "Execution — ready"}</h2>
-      <div className={styles.execRow}>
-        <span className={styles.name}>{halted ? "IP (past HLT)" : "next at CS:IP"}</span>
+      <div className={styles.execRow} data-testid="exec-last">
+        <span className={styles.name}>last executed</span>
+        {prev !== null ? (
+          <>
+            <span className={styles.value}>
+              {hex16(prev.cs)}:{hex16(prev.ip)}
+            </span>
+            <span className={styles.name}>physical</span>
+            <span className={styles.value}>{hex20(prev.linear_ip)}</span>
+          </>
+        ) : (
+          <span className={styles.value}>—</span>
+        )}
+      </div>
+      <div className={styles.execRow} data-testid="exec-next">
+        <span className={styles.name}>next at CS:IP</span>
         <span className={styles.value}>
           {hex16(snapshot.cs)}:{hex16(snapshot.ip)}
         </span>
@@ -138,19 +144,13 @@ function Execution({ snapshot }: { snapshot: Snapshot }) {
         <span className={styles.value}>{hex20(snapshot.linear_ip)}</span>
       </div>
       <div className={styles.execRow}>
-        <span className={styles.name}>{halted ? "bytes at IP" : "bytes"}</span>
+        <span className={styles.name}>bytes</span>
         <span className={styles.value}>{snapshot.insn_bytes.map(hex8).join(" ")}</span>
       </div>
       {halted && (
-        <>
-          <div className={styles.execRow}>
-            <span className={styles.name}>last executed</span>
-            <span className={styles.value}>HLT at {hex20(lastExecuted)}</span>
-          </div>
-          <p className={styles.note}>
-            IP advanced past HLT. No further instruction executes until reset and load.
-          </p>
-        </>
+        <p className={styles.note}>
+          IP advanced past HLT. No further instruction executes until reset and load.
+        </p>
       )}
     </section>
   );
@@ -265,7 +265,7 @@ function LastStep({ snapshot, prev, batch }: PanelProps & { batch: boolean }) {
       : rows.length === 0
         ? batch
           ? "No displayed values changed since the last update."
-          : "No displayed values changed by that step."
+          : "No register, flag, or visible memory changes. Execution address updated."
         : null;
   return (
     <section className={styles.panel}>

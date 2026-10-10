@@ -93,6 +93,20 @@ impl Reg16 {
             _ => Self::Di,
         }
     }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "ax" => Some(Self::Ax),
+            "cx" => Some(Self::Cx),
+            "dx" => Some(Self::Dx),
+            "bx" => Some(Self::Bx),
+            "sp" => Some(Self::Sp),
+            "bp" => Some(Self::Bp),
+            "si" => Some(Self::Si),
+            "di" => Some(Self::Di),
+            _ => None,
+        }
+    }
 }
 
 impl Reg8 {
@@ -106,6 +120,32 @@ impl Reg8 {
             5 => Self::Ch,
             6 => Self::Dh,
             _ => Self::Bh,
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "al" => Some(Self::Al),
+            "cl" => Some(Self::Cl),
+            "dl" => Some(Self::Dl),
+            "bl" => Some(Self::Bl),
+            "ah" => Some(Self::Ah),
+            "ch" => Some(Self::Ch),
+            "dh" => Some(Self::Dh),
+            "bh" => Some(Self::Bh),
+            _ => None,
+        }
+    }
+}
+
+impl Seg {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "es" => Some(Self::Es),
+            "cs" => Some(Self::Cs),
+            "ss" => Some(Self::Ss),
+            "ds" => Some(Self::Ds),
+            _ => None,
         }
     }
 }
@@ -129,5 +169,19 @@ mod tests {
         rf.set_reg(Reg16::Ax, 0xABCD);
         assert_eq!(rf.reg8(Reg8::Al), 0xCD);
         assert_eq!(rf.reg8(Reg8::Ah), 0xAB);
+    }
+
+    #[test]
+    fn names_resolve_every_register() {
+        assert_eq!(Reg16::from_name("ax"), Some(Reg16::Ax));
+        assert_eq!(Reg16::from_name("di"), Some(Reg16::Di));
+        assert_eq!(Reg16::from_name("AX"), None);
+        assert_eq!(Reg16::from_name("ah"), None);
+        assert_eq!(Reg8::from_name("al"), Some(Reg8::Al));
+        assert_eq!(Reg8::from_name("bh"), Some(Reg8::Bh));
+        assert_eq!(Reg8::from_name("ax"), None);
+        assert_eq!(Seg::from_name("cs"), Some(Seg::Cs));
+        assert_eq!(Seg::from_name("ds"), Some(Seg::Ds));
+        assert_eq!(Seg::from_name("ip"), None);
     }
 }
