@@ -3,7 +3,8 @@
 Each `.asm` is restricted to `cpu 8086` (NASM rejects 386+ mnemonics) and to
 the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
 `ADD/SUB/CMP r/m16, imm` (`81 /0`, `81 /5`, `81 /7`, `83 /0`, `83 /5`,
-`83 /7`), `MOV` between r/m and reg for byte and word (`88`–`8B`),
+`83 /7`), `ADD/SUB/CMP r/m8, imm8` (`80 /0`, `80 /5`, `80 /7`),
+`MOV` between r/m and reg for byte and word (`88`–`8B`),
 `ADD AX, imm16` (`05 iw`), `SUB/CMP AX, imm16` (`2D iw`, `3D iw`),
 `JMP short/near` (`EB`, `E9`), `JE/JNE short` (`74`/`75`), `HLT` (`F4`).
 NASM is invoked with `-O0` so `add ax, imm` assembles to the canonical
