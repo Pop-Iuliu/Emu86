@@ -1,6 +1,16 @@
-import { useRef, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import styles from "./App.module.css";
-import { hex8, hex16, hex20, type ExecStatus, type ProgramInfo, type Snapshot } from "./protocol";
+import {
+  formatReg,
+  isRegFormat,
+  hex8,
+  hex16,
+  hex20,
+  type ExecStatus,
+  type ProgramInfo,
+  type RegFormat,
+  type Snapshot,
+} from "./protocol";
 
 const WORD_REGS = [
   ["ax", "AX"],
@@ -68,17 +78,34 @@ function changedIn(prev: Snapshot | null, snapshot: Snapshot, get: (s: Snapshot)
 }
 
 function Registers({ snapshot, prev }: PanelProps) {
+  const [format, setFormat] = useState<RegFormat>("hex");
   const changed = (get: (s: Snapshot) => number) => changedIn(prev, snapshot, get);
+  const render = (v: number) => formatReg(v, format);
   return (
     <section className={styles.panel}>
-      <h2>Registers</h2>
+      <div className={styles.panelHeader}>
+        <h2>Registers</h2>
+        <select
+          className={styles.formatSelect}
+          data-testid="reg-format"
+          aria-label="Register format"
+          value={format}
+          onChange={(e) => {
+            if (isRegFormat(e.target.value)) setFormat(e.target.value);
+          }}
+        >
+          <option value="hex">hex</option>
+          <option value="dec">dec</option>
+          <option value="bin">bin</option>
+        </select>
+      </div>
       <div className={styles.grid}>
         {WORD_REGS.map(([key, label]) => (
           <Value
             key={key}
             name={label}
             value={snapshot[key]}
-            format={hex16}
+            format={render}
             changed={changed((s) => s[key])}
           />
         ))}
@@ -89,7 +116,7 @@ function Registers({ snapshot, prev }: PanelProps) {
             key={key}
             name={label}
             value={snapshot[key]}
-            format={hex16}
+            format={render}
             changed={changed((s) => s[key])}
           />
         ))}

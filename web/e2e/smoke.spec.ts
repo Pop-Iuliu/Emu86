@@ -150,3 +150,24 @@ test("invalid binaries are rejected and keep the current program", async ({ page
   await page.getByRole("button", { name: "Step" }).click();
   await expect(page.getByTestId("reg-bx")).toHaveText(/BX.*0020/);
 });
+
+test("register format toggle switches hex, decimal and binary", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Load demo" }).click();
+
+  // Default is hex: AX = 0 → "0000" after the AX label.
+  await expect(page.getByTestId("reg-ax")).toHaveText(/^AX\s*0000$/);
+
+  await page.getByTestId("reg-format").selectOption("dec");
+  await expect(page.getByTestId("reg-ax")).toHaveText(/^AX\s*0$/);
+  // Segments follow the same format; CS = FFFF at reset.
+  await expect(page.getByTestId("reg-cs")).toHaveText(/^CS\s*65535$/);
+
+  await page.getByTestId("reg-format").selectOption("bin");
+  await expect(page.getByTestId("reg-ax")).toHaveText(/^AX\s*0{16}$/);
+  await expect(page.getByTestId("reg-cs")).toHaveText(/^CS\s*1{16}$/);
+
+  await page.getByTestId("reg-format").selectOption("hex");
+  await expect(page.getByTestId("reg-ax")).toHaveText(/^AX\s*0000$/);
+  await expect(page.getByTestId("reg-cs")).toHaveText(/^CS\s*FFFF$/);
+});

@@ -62,6 +62,26 @@ export const hex8 = (v: number): string => v.toString(16).toUpperCase().padStart
 export const hex16 = (v: number): string => v.toString(16).toUpperCase().padStart(4, "0");
 export const hex20 = (v: number): string => v.toString(16).toUpperCase().padStart(5, "0");
 
+/**
+ * Display base for the register panel. Word registers are 16 bits wide, so
+ * binary is padded to a full 16 digits and decimal is never padded.
+ */
+export type RegFormat = "hex" | "dec" | "bin";
+
+export const isRegFormat = (v: string): v is RegFormat =>
+  v === "hex" || v === "dec" || v === "bin";
+
+export const formatReg = (v: number, format: RegFormat): string => {
+  switch (format) {
+    case "dec":
+      return v.toString(10);
+    case "bin":
+      return v.toString(2).padStart(16, "0");
+    default:
+      return hex16(v);
+  }
+};
+
 export const RESET_SEG = 0xffff;
 export const RESET_OFF = 0x0000;
 export const MAX_PROGRAM_BYTES = 0x100000;
