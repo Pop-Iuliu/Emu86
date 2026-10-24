@@ -629,7 +629,7 @@ mod tests {
         assert_eq!(cpu.mem.read(0x0010), 0xFF);
         assert!(cpu.flags.get(Flags::CF));
         assert!(cpu.flags.get(Flags::SF));
-        assert_eq!(cpu.flags.bits(), 0xF897);
+        assert_eq!(cpu.flags.bits(), 0xF097);
     }
 
     #[test]
@@ -638,7 +638,7 @@ mod tests {
         let mut cpu = cpu_with(&[0x80, 0xC7, 0x01]); // add bh, 1
         cpu.regs.set_reg(Reg16::Bx, 0x1200);
         cpu.step().unwrap();
-        assert_eq!(cpu.regs.reg8(Reg8::Bh), 0x01);
+        assert_eq!(cpu.regs.reg8(Reg8::Bh), 0x13);
         assert_eq!(cpu.regs.reg8(Reg8::Bl), 0x00);
     }
 
