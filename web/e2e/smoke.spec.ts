@@ -166,6 +166,12 @@ test("register format toggle switches hex, decimal and binary", async ({ page })
   await page.getByTestId("reg-format").selectOption("bin");
   await expect(page.getByTestId("reg-ax")).toHaveText(/^AX\s*0{16}$/);
   await expect(page.getByTestId("reg-cs")).toHaveText(/^CS\s*1{16}$/);
+  // No value may extend past the register panel's right edge.
+  const overflow = await page.getByTestId("reg-ds").evaluate((el) => {
+    const panel = el.closest("section")!;
+    return el.getBoundingClientRect().right - panel.getBoundingClientRect().right;
+  });
+  expect(overflow).toBeLessThanOrEqual(0);
 
   await page.getByTestId("reg-format").selectOption("hex");
   await expect(page.getByTestId("reg-ax")).toHaveText(/^AX\s*0000$/);

@@ -81,6 +81,9 @@ function Registers({ snapshot, prev }: PanelProps) {
   const [format, setFormat] = useState<RegFormat>("hex");
   const changed = (get: (s: Snapshot) => number) => changedIn(prev, snapshot, get);
   const render = (v: number) => formatReg(v, format);
+  // Binary values are 16 digits wide; four of them cannot fit in the panel, so
+  // the register grids drop to two columns and grow vertically instead.
+  const gridClass = format === "bin" ? `${styles.grid} ${styles.gridWide}` : styles.grid;
   return (
     <section className={styles.panel}>
       <div className={styles.panelHeader}>
@@ -99,7 +102,7 @@ function Registers({ snapshot, prev }: PanelProps) {
           <option value="bin">bin</option>
         </select>
       </div>
-      <div className={styles.grid}>
+      <div className={gridClass}>
         {WORD_REGS.map(([key, label]) => (
           <Value
             key={key}
@@ -110,7 +113,7 @@ function Registers({ snapshot, prev }: PanelProps) {
           />
         ))}
       </div>
-      <div className={styles.grid}>
+      <div className={gridClass}>
         {SEG_REGS.map(([key, label]) => (
           <Value
             key={key}

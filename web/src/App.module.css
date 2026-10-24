@@ -114,6 +114,10 @@
   margin-top: 0.4rem;
 }
 
+.gridWide {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .cell {
   display: flex;
   justify-content: space-between;
@@ -128,6 +132,7 @@
   font-weight: bold;
   font-variant-numeric: tabular-nums;
   padding: 0 0.2rem;
+  white-space: nowrap;
 }
 
 .changed .value {
