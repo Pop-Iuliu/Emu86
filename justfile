@@ -47,7 +47,7 @@ ci:
     just check
     just asm-verify
     just wasm-build
-    just web-lint
     just web-test
+    just web-lint
     just web-build
     just web-e2e
