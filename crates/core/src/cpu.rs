@@ -69,7 +69,6 @@ impl Cpu {
         if self.halted {
             return Err(StepError::Halted);
         }
-        let start = self.ip;
         let op = self.fetch8();
         match op {
             0xB8..=0xBF => {
@@ -82,7 +81,7 @@ impl Cpu {
                 let imm = self.fetch8();
                 self.regs.set_reg8(r, imm);
             }
-            0x80 | 0x81 | 0x83 => self.alu_rm_imm(start, op)?,
+            0x80 | 0x81 | 0x83 => self.alu_rm_imm(op)?,
             0x88..=0x8B => self.mov_rm_reg(op),
             0x05 => {
                 let imm = self.fetch16();
@@ -127,42 +126,55 @@ impl Cpu {
         Ok(())
     }
 
-    fn alu_rm_imm(&mut self, start: u16, op: u8) -> Result<(), StepError> {
+    fn alu_rm_imm(&mut self, op: u8) -> Result<(), StepError> {
         let modrm = self.fetch8();
         let alu_op = (modrm >> 3) & 0b111;
-        match alu_op {
-            0 | 5 | 7 => {
-                // 0x80 is the byte form; 0x81/0x83 are word.
-                let wide = op != 0x80;
-                let dst = self.decode_rm(modrm, wide);
-                let imm = match op {
-                    0x81 => self.fetch16(),
-                    // 0x83's immediate is sign-extended; 0x80's is a raw byte.
-                    0x83 => self.fetch8() as i8 as u16,
-                    _ => u16::from(self.fetch8()),
-                };
-                let a = dst.read(&self.regs, &self.mem);
-                let (r, f) = if wide {
-                    match alu_op {
-                        0 => alu::add(a, imm),
-                        _ => alu::sub(a, imm),
-                    }
-                } else {
-                    // `Operand::read` zero-extends, so narrow back to u8
-                    // before the byte-width flag maths runs.
-                    let (r, f) = match alu_op {
-                        0 => alu::add8(a as u8, imm as u8),
-                        _ => alu::sub8(a as u8, imm as u8),
-                    };
-                    (u16::from(r), f)
-                };
-                if alu_op != 7 {
-                    dst.write(&mut self.regs, &mut self.mem, r);
-                }
-                self.set_flag_bits(f);
+        // 0x80 is the byte form; 0x81/0x83 are word.
+        let wide = op != 0x80;
+        let dst = self.decode_rm(modrm, wide);
+        let imm = match op {
+            0x81 => self.fetch16(),
+            // 0x83's immediate is sign-extended; 0x80's is a raw byte.
+            0x83 => self.fetch8() as i8 as u16,
+            _ => u16::from(self.fetch8()),
+        };
+        // Read the carry-in before the result's flags are written back, so
+        // ADC/SBB see the CF produced by the previous instruction.
+        let carry = u16::from(self.flags.get(Flags::CF));
+        let a = dst.read(&self.regs, &self.mem);
+        let (r, f) = if wide {
+            match alu_op {
+                0 => alu::add(a, imm),
+                1 => alu::or(a, imm),
+                2 => alu::adc(a, imm, carry),
+                3 => alu::sbb(a, imm, carry),
+                4 => alu::and(a, imm),
+                5 => alu::sub(a, imm),
+                6 => alu::xor(a, imm),
+                _ => alu::sub(a, imm), // /7 = CMP: flags only
             }
-            _ => return Err(self.unsupported_form(start)),
+        } else {
+            // `Operand::read` zero-extends, so narrow back to u8 before the
+            // byte-width flag maths runs.
+            let a8 = a as u8;
+            let imm8 = imm as u8;
+            let carry8 = carry as u8;
+            let (r, f) = match alu_op {
+                0 => alu::add8(a8, imm8),
+                1 => alu::or8(a8, imm8),
+                2 => alu::adc8(a8, imm8, carry8),
+                3 => alu::sbb8(a8, imm8, carry8),
+                4 => alu::and8(a8, imm8),
+                5 => alu::sub8(a8, imm8),
+                6 => alu::xor8(a8, imm8),
+                _ => alu::sub8(a8, imm8), // /7 = CMP: flags only
+            };
+            (u16::from(r), f)
+        };
+        if alu_op != 7 {
+            dst.write(&mut self.regs, &mut self.mem, r);
         }
+        self.set_flag_bits(f);
         Ok(())
     }
 
@@ -181,15 +193,6 @@ impl Cpu {
         let regs = self.regs;
         let mut fetch = || self.fetch8();
         Operand::decode_rm(&mut fetch, regs, modrm, wide)
-    }
-
-    fn unsupported_form(&self, start: u16) -> StepError {
-        let base = Memory::linear(self.regs.seg(Seg::Cs), start);
-        let len = self.ip.wrapping_sub(start) as usize;
-        StepError::UnsupportedForm {
-            ip: start,
-            bytes: (0..len).map(|i| self.mem.read(base + i)).collect(),
-        }
     }
 
     fn set_flag_bits(&mut self, f: u16) {
@@ -592,19 +595,6 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_form_reports_ip_and_bytes() {
-        let mut cpu = cpu_with(&[0x81, 0xC8, 0x34, 0x12]);
-        assert_eq!(
-            cpu.step(),
-            Err(StepError::UnsupportedForm {
-                ip: RESET_OFF,
-                bytes: vec![0x81, 0xC8],
-            })
-        );
-        assert_eq!(cpu.ip, RESET_OFF + 2);
-    }
-
-    #[test]
     fn add_byte_imm_to_memory_uses_byte_flags() {
         // 80 /0 = ADD r/m8, imm8
         let mut cpu = cpu_with(&[0x80, 0x07, 0x01]); // add byte [bx], 1
@@ -674,16 +664,4 @@ mod tests {
         assert_eq!(cpu.flags.bits() & !Flags::SETTABLE, 0xF002);
     }
 
-    #[test]
-    fn byte_group1_rejects_operators_other_than_add_sub_cmp() {
-        let mut cpu = cpu_with(&[0x80, 0xC8, 0x01]); // 80 /1 = OR
-        assert_eq!(
-            cpu.step(),
-            Err(StepError::UnsupportedForm {
-                ip: RESET_OFF,
-                bytes: vec![0x80, 0xC8],
-            })
-        );
-        assert_eq!(cpu.ip, RESET_OFF + 2);
-    }
 }

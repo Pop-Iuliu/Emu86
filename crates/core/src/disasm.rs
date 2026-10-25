@@ -111,9 +111,13 @@ fn decode(op: u8, fetch8: Fetch8<'_>, ip_after: &dyn Fn() -> u32) -> Option<Stri
             let modrm = fetch8();
             let mnem = match (modrm >> 3) & 0b111 {
                 0 => "add",
+                1 => "or",
+                2 => "adc",
+                3 => "sbb",
+                4 => "and",
                 5 => "sub",
-                7 => "cmp",
-                _ => return None,
+                6 => "xor",
+                _ => "cmp",
             };
             let (md, _reg, rm) = modrm_fields(modrm);
             let wide = op != 0x80;
@@ -251,12 +255,6 @@ mod tests {
             ),
             vec!["add [bx+2], 0x1000", "sub [bx], -1", "cmp [bx], 0",]
         );
-    }
-
-    #[test]
-    fn alu_with_unsupported_operator_is_db() {
-        // 0x81 /1 = OR — the CPU raises UnsupportedForm, the listing says db.
-        assert_eq!(texts(&[0x81, 0xC8, 0x34, 0x12], 1), vec!["db 0x81"]);
     }
 
     #[test]
@@ -400,9 +398,4 @@ mod tests {
         assert_eq!(insns[1].off, 0x0004);
     }
 
-    #[test]
-    fn byte_alu_with_unsupported_operator_is_db() {
-        // 0x80 /1 = OR — the CPU raises UnsupportedForm, the listing says db.
-        assert_eq!(texts(&[0x80, 0xC8, 0x01], 1), vec!["db 0x80"]);
-    }
 }
