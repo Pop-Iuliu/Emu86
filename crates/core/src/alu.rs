@@ -11,6 +11,9 @@ fn flag_bits(a: u16, b: u16, r: u16, cf: bool, of: bool, sign: u16) -> u16 {
     cf | pf | af | zf | sf | of
 }
 
+/// Flag mask for the bitwise operators: CF, AF and OF are always cleared,
+/// so only PF/ZF/SF are derived, from the result. `sign` selects the width
+/// (`0x8000` word, `0x0080` byte).
 fn logic_flags(r: u16, sign: u16) -> u16 {
     let width = sign | (sign - 1);
     let pf = u16::from(r as u8).count_ones() as u16 % 2;
@@ -34,6 +37,8 @@ pub fn sub(a: u16, b: u16) -> (u16, u16) {
     (r, flag_bits(a, b, r, cf, of, 0x8000))
 }
 
+/// ADD with carry-in. `carry` is 0 or 1. CF includes it, and OF/AF/PF/ZF/SF
+/// follow `add`'s rules adjusted for the extra increment.
 pub fn adc(a: u16, b: u16, carry: u16) -> (u16, u16) {
     let r = a.wrapping_add(b).wrapping_add(carry);
     let cf = a as u32 + b as u32 + carry as u32 > 0xFFFF;
@@ -41,6 +46,9 @@ pub fn adc(a: u16, b: u16, carry: u16) -> (u16, u16) {
     (r, flag_bits(a, b, r, cf, of, 0x8000))
 }
 
+/// SUB with borrow-in. `carry` is 0 or 1. CF reports borrow from the
+/// effective subtrahend `b + carry`, so `sbb(1, 0, 1)` produces CF = 0 but
+/// `sbb(0, 0, 1)` produces CF = 1.
 pub fn sbb(a: u16, b: u16, carry: u16) -> (u16, u16) {
     let r = a.wrapping_sub(b).wrapping_sub(carry);
     let cf = (a as u32) < (b as u32) + (carry as u32);
@@ -48,16 +56,19 @@ pub fn sbb(a: u16, b: u16, carry: u16) -> (u16, u16) {
     (r, flag_bits(a, b, r, cf, of, 0x8000))
 }
 
+/// Bitwise AND. Clears CF, AF and OF; SF/ZF/PF from the result.
 pub fn and(a: u16, b: u16) -> (u16, u16) {
     let r = a & b;
     (r, logic_flags(r, 0x8000))
 }
 
+/// Bitwise OR. Clears CF, AF and OF; SF/ZF/PF from the result.
 pub fn or(a: u16, b: u16) -> (u16, u16) {
     let r = a | b;
     (r, logic_flags(r, 0x8000))
 }
 
+/// Bitwise XOR. Clears CF, AF and OF; SF/ZF/PF from the result.
 pub fn xor(a: u16, b: u16) -> (u16, u16) {
     let r = a ^ b;
     (r, logic_flags(r, 0x8000))
@@ -83,6 +94,7 @@ pub fn sub8(a: u8, b: u8) -> (u8, u16) {
     )
 }
 
+/// 8-bit sibling of `adc`; flags are width-correct (CF/OF from bit 7).
 pub fn adc8(a: u8, b: u8, carry: u8) -> (u8, u16) {
     let r = a.wrapping_add(b).wrapping_add(carry);
     let cf = (a as u16) + (b as u16) + (carry as u16) > 0xFF;
@@ -93,6 +105,7 @@ pub fn adc8(a: u8, b: u8, carry: u8) -> (u8, u16) {
     )
 }
 
+/// 8-bit sibling of `sbb`; flags are width-correct (CF/OF from bit 7).
 pub fn sbb8(a: u8, b: u8, carry: u8) -> (u8, u16) {
     let r = a.wrapping_sub(b).wrapping_sub(carry);
     let cf = (a as u16) < (b as u16) + (carry as u16);
@@ -103,16 +116,19 @@ pub fn sbb8(a: u8, b: u8, carry: u8) -> (u8, u16) {
     )
 }
 
+/// 8-bit sibling of `and`; SF from bit 7, ZF over 8 bits.
 pub fn and8(a: u8, b: u8) -> (u8, u16) {
     let r = a & b;
     (r, logic_flags(r as u16, 0x0080))
 }
 
+/// 8-bit sibling of `or`; SF from bit 7, ZF over 8 bits.
 pub fn or8(a: u8, b: u8) -> (u8, u16) {
     let r = a | b;
     (r, logic_flags(r as u16, 0x0080))
 }
 
+/// 8-bit sibling of `xor`; SF from bit 7, ZF over 8 bits.
 pub fn xor8(a: u8, b: u8) -> (u8, u16) {
     let r = a ^ b;
     (r, logic_flags(r as u16, 0x0080))
