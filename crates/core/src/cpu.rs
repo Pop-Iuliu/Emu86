@@ -671,4 +671,132 @@ mod tests {
         assert_eq!(cpu.flags.bits() & !Flags::SETTABLE, 0xF002);
     }
 
+    // -----------------------------------------------------------------------
+    // Group 1 through `Cpu::step`: prove the decode in `alu_rm_imm` routes each
+    // of the eight `match alu_op` arms to its own helper. `alu.rs` covers the
+    // helpers in isolation, but a swap of two arms here would not fail those
+    // unit tests. Fields `/0`, `/5`, `/7` are already covered by the earlier
+    // slice; this section closes `/1`, `/2`, `/3`, `/4`, `/6` at both widths
+    // and pins the `83 /1` sign-extension path.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn group1_word_or_through_step() {
+        // 81 /1 -> OR AX, imm16. 0x00FF | 0x0001 = 0x00FF; ADD would give 0x0100.
+        let mut cpu = cpu_with(&[0x81, 0xC8, 0x01, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 0x00FF);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x00FF);
+        // PF set (0xFF has even parity); CF/AF/OF cleared by the logic result.
+        assert_eq!(cpu.flags.bits(), 0xF006);
+    }
+
+    #[test]
+    fn group1_word_adc_consumes_carry_through_step() {
+        // 81 /2 -> ADC AX, imm16 with CF = 1: 0 + 0 + 1 = 1. ADD would leave 0.
+        let mut cpu = cpu_with(&[0x81, 0xD0, 0x00, 0x00]);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0001);
+        assert_eq!(cpu.flags.bits(), 0xF002);
+    }
+
+    #[test]
+    fn group1_word_sbb_consumes_borrow_through_step() {
+        // 81 /3 -> SBB AX, imm16 with CF = 1: 1 - 0 - 1 = 0. SUB would leave 1.
+        let mut cpu = cpu_with(&[0x81, 0xD8, 0x00, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 0x0001);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0000);
+        // ZF | PF (result 0 is even parity).
+        assert_eq!(cpu.flags.bits(), 0xF046);
+    }
+
+    #[test]
+    fn group1_word_and_through_step() {
+        // 81 /4 -> AND AX, imm16. 0xFFFF & 0x00FF = 0x00FF; OR would keep 0xFFFF.
+        let mut cpu = cpu_with(&[0x81, 0xE0, 0xFF, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 0xFFFF);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x00FF);
+        assert_eq!(cpu.flags.bits(), 0xF006);
+    }
+
+    #[test]
+    fn group1_word_xor_through_step() {
+        // 81 /6 -> XOR AX, imm16. 0xA5A5 ^ 0xFFFF = 0x5A5A; AND would keep 0xA5A5.
+        let mut cpu = cpu_with(&[0x81, 0xF0, 0xFF, 0xFF]);
+        cpu.regs.set_reg(Reg16::Ax, 0xA5A5);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x5A5A);
+        assert_eq!(cpu.flags.bits(), 0xF006);
+    }
+
+    #[test]
+    fn group1_byte_or_through_step() {
+        // 80 /1 -> OR AL, imm8. 0xF0 | 0xFF = 0xFF; AH (0x12) must survive.
+        let mut cpu = cpu_with(&[0x80, 0xC8, 0xFF]);
+        cpu.regs.set_reg(Reg16::Ax, 0x12F0);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x12FF);
+        // PF (even parity of 0xFF) | SF (bit 7 of 0xFF is set at byte width).
+        assert_eq!(cpu.flags.bits(), 0xF086);
+    }
+
+    #[test]
+    fn group1_byte_adc_consumes_carry_through_step() {
+        // 80 /2 -> ADC AL, imm8 with CF = 1: 0 + 0 + 1 = 1.
+        let mut cpu = cpu_with(&[0x80, 0xD0, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 0x1200);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x1201);
+        assert_eq!(cpu.flags.bits(), 0xF002);
+    }
+
+    #[test]
+    fn group1_byte_sbb_consumes_borrow_through_step() {
+        // 80 /3 -> SBB AL, imm8 with CF = 1: 1 - 0 - 1 = 0.
+        let mut cpu = cpu_with(&[0x80, 0xD8, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 0x1201);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x1200);
+        assert_eq!(cpu.flags.bits(), 0xF046);
+    }
+
+    #[test]
+    fn group1_byte_and_through_step() {
+        // 80 /4 -> AND AL, imm8. 0xFF & 0x0F = 0x0F.
+        let mut cpu = cpu_with(&[0x80, 0xE0, 0x0F]);
+        cpu.regs.set_reg(Reg16::Ax, 0x12FF);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x120F);
+        assert_eq!(cpu.flags.bits(), 0xF006);
+    }
+
+    #[test]
+    fn group1_byte_xor_through_step() {
+        // 80 /6 -> XOR AL, imm8. 0xAA ^ 0xFF = 0x55.
+        let mut cpu = cpu_with(&[0x80, 0xF0, 0xFF]);
+        cpu.regs.set_reg(Reg16::Ax, 0x12AA);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x1255);
+        assert_eq!(cpu.flags.bits(), 0xF006);
+    }
+
+    #[test]
+    fn group1_word_or_imm8_sign_extends() {
+        // 83 /1 -> OR AX, imm8. imm8 = 0xFF sign-extends to 0xFFFF, so the
+        // result is 0xFFFF. A raw byte immediate (0x00FF) would give 0x00FF.
+        // Also refutes the CHANGELOG line that used to omit `83 /1`.
+        let mut cpu = cpu_with(&[0x83, 0xC8, 0xFF]);
+        cpu.regs.set_reg(Reg16::Ax, 0x00F0);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0xFFFF);
+        // PF (0xFF parity) | SF (bit 15 of 0xFFFF).
+        assert_eq!(cpu.flags.bits(), 0xF086);
+    }
+
 }

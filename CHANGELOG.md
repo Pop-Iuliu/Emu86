@@ -9,22 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Core: **group 1 completion** — `OR`, `ADC`, `SBB`, `AND`, `XOR` now
-  execute for every immediate form: `81 /1`–`/4`, `/6`, `83 /2`–`/4`,
-  `/6`, and `80 /1`–`/4`, `/6`, alongside the existing `ADD /0`,
-  `SUB /5`, `CMP /7`. `ADC` and `SBB` consume CF as carry‑in; the
-  logical operators clear CF/AF/OF and derive SF/ZF/PF from the
-  width‑correct result bits. `CMP /7` keeps its flags‑only write rule.
-  The disassembler renders the same eight mnemonics for all three
-  opcode bytes. The `unsupported_form` byte‑dump helper is gone;
+- Core: **group 1 completion** — all eight fields `/0`–`/7` now
+  execute for `80`, `81` and `83`, so `ADD`, `OR`, `ADC`, `SBB`,
+  `AND`, `SUB`, `XOR` and `CMP` are available at both widths. `83`'s
+  immediate sign‑extends; `80`'s is a raw byte and `81`'s is `imm16`.
+  `ADC` and `SBB` consume CF as carry‑in; the logical operators clear
+  CF/AF/OF and derive SF/ZF/PF from the width‑correct result bits;
+  `CMP /7` keeps its flags‑only write rule. The disassembler renders
+  the same eight mnemonics for all three opcode bytes. The
+  `unsupported_form` byte‑dump helper is gone;
   `StepError::UnsupportedForm` stays in the enum (unreachable) so the
   CLI, `run.rs` and the wasm adapter keep their match arms.
-- Tests: group 1 — one case per field `/0`–`/7` for both widths through
-  `Cpu::step`; `ADC`/`SBB` carry‑in cases distinguished from their `ADD`/
-  `SUB` counterparts; logical ops pinned on CF/AF/OF clearing and SF
-  from bit 7 vs bit 15; disassembler mnemonics for the eight fields per
-  opcode; the CLI's `group1_or_executes_to_halt` exercises `81 /1`
-  end‑to‑end.
+- Tests: group 1 — per‑field word and byte cases with exact FLAGS‑word
+  assertions at the ALU‑helper level; `Cpu::step` drives all eight
+  fields at both widths (`/0`, `/5`, `/7` from the earlier slice;
+  `/1`, `/2`, `/3`, `/4`, `/6` added here), plus the `83 /1`
+  sign‑extension path; `ADC`/`SBB` carry‑in cases distinguished from
+  their `ADD`/`SUB` counterparts; logical ops pinned on CF/AF/OF
+  clearing and SF from bit 7 vs bit 15; disassembler mnemonics for the
+  eight fields per opcode; the CLI's `group1_or_executes_to_halt`
+  exercises `81 /1` end‑to‑end.
 
 - Core: byte-width group 1 — `ADD/SUB/CMP r/m8, imm8` (`80 /0`, `80 /5`,
   `80 /7`). `80` shares the `81`/`83` decode path and leaves those
