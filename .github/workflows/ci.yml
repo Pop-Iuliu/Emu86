@@ -69,6 +69,8 @@ jobs:
           just web-install
           just web-lint
           just web-build
+      - name: Unit tests (Vitest)
+        run: just web-test
       - name: E2E smoke test
         run: |
           pnpm --dir web exec playwright install --with-deps chromium

@@ -27,6 +27,9 @@ web-install:
 web-lint:
     pnpm --dir web lint
 
+web-test: web-install
+    pnpm --dir web test
+
 web-build: wasm-build web-install
     pnpm --dir web build
 
@@ -45,5 +48,6 @@ ci:
     just asm-verify
     just wasm-build
     just web-lint
+    just web-test
     just web-build
     just web-e2e
