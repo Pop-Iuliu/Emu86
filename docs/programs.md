@@ -7,8 +7,15 @@ the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
 `MOV` between r/m and reg for byte and word (`88`–`8B`),
 `ADD AX, imm16` (`05 iw`), `SUB/CMP AX, imm16` (`2D iw`, `3D iw`),
 `JMP short/near` (`EB`, `E9`), `JE/JNE short` (`74`/`75`), `HLT` (`F4`).
-NASM is invoked with `-O0` so `add ax, imm` assembles to the canonical
-`05 iw` form rather than the r/m form `83 /0`.
+
+Two traps follow from that list. NASM is invoked with `-O0` so `add ax, imm`
+assembles to the canonical `05 iw` form rather than `81 /0`; the accumulator
+form is what a hand-written `add ax, imm` actually produces, so it has to be
+implemented for the source to run. And the byte accumulator forms (`04`,
+`0C`, `24`, `2C`, `34`, `3C`) are *not* implemented, so `add al, imm8` and
+`sub al, imm8` — which NASM encodes as `04` and `2C` — raise
+`UnknownOpcode`. Targeting any non-`AL` register (`add bl, imm8`) or a
+memory operand assembles to `80 /0`, which works.
 
 Binaries (`.bin`) are committed flat images loaded at reset state
 `CS:IP = FFFF:0000` (physical `0xFFFF0`). The browser **Load binary…** control accepts the
