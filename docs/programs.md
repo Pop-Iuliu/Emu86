@@ -2,8 +2,8 @@
 
 Each `.asm` is restricted to `cpu 8086` (NASM rejects 386+ mnemonics) and to
 the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
-`ADD/SUB/CMP r/m16, imm` (`81 /0`, `81 /5`, `81 /7`, `83 /0`, `83 /5`,
-`83 /7`), `ADD/SUB/CMP r/m8, imm8` (`80 /0`, `80 /5`, `80 /7`),
+`ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m16, imm` (`81 /0`–`/7`,
+`83 /0`–`/7`), `ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m8, imm8` (`80 /0`–`/7`),
 `MOV` between r/m and reg for byte and word (`88`–`8B`),
 `ADD AX, imm16` (`05 iw`), `SUB/CMP AX, imm16` (`2D iw`, `3D iw`),
 `JMP short/near` (`EB`, `E9`), `JE/JNE short` (`74`/`75`), `HLT` (`F4`).
@@ -11,11 +11,15 @@ the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
 Two traps follow from that list. NASM is invoked with `-O0` so `add ax, imm`
 assembles to the canonical `05 iw` form rather than `81 /0`; the accumulator
 form is what a hand-written `add ax, imm` actually produces, so it has to be
-implemented for the source to run. And the byte accumulator forms (`04`,
-`0C`, `24`, `2C`, `34`, `3C`) are *not* implemented, so `add al, imm8` and
-`sub al, imm8` — which NASM encodes as `04` and `2C` — raise
-`UnknownOpcode`. Targeting any non-`AL` register (`add bl, imm8`) or a
-memory operand assembles to `80 /0`, which works.
+implemented for the source to run. The accumulator forms for the non-`ADD`/
+`SUB`/`CMP` group-1 fields (`0D`, `15`, `1D`, `25`, `35`) are also
+unimplemented; `or ax, imm` therefore has to be written as `or bx, imm`
+(encoded `81 /1`) or another explicit r/m target. And the byte accumulator
+forms (`04`, `0C`, `14`, `1C`, `24`, `2C`, `34`, `3C`) are *not*
+implemented, so `add al, imm8`, `or al, imm8`, `adc al, imm8` and their
+siblings raise `UnknownOpcode` — NASM encodes those as `04`, `0C`, `14`,
+and so on. Targeting any non-`AL` register (`add bl, imm8`) or a memory
+operand assembles to `80 /0`, which works.
 
 Binaries (`.bin`) are committed flat images loaded at reset state
 `CS:IP = FFFF:0000` (physical `0xFFFF0`). The browser **Load binary…** control accepts the

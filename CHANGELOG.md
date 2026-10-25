@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core: **group 1 completion** — `OR`, `ADC`, `SBB`, `AND`, `XOR` now
+  execute for every immediate form: `81 /1`–`/4`, `/6`, `83 /2`–`/4`,
+  `/6`, and `80 /1`–`/4`, `/6`, alongside the existing `ADD /0`,
+  `SUB /5`, `CMP /7`. `ADC` and `SBB` consume CF as carry‑in; the
+  logical operators clear CF/AF/OF and derive SF/ZF/PF from the
+  width‑correct result bits. `CMP /7` keeps its flags‑only write rule.
+  The disassembler renders the same eight mnemonics for all three
+  opcode bytes. The `unsupported_form` byte‑dump helper is gone;
+  `StepError::UnsupportedForm` stays in the enum (unreachable) so the
+  CLI, `run.rs` and the wasm adapter keep their match arms.
+- Tests: group 1 — one case per field `/0`–`/7` for both widths through
+  `Cpu::step`; `ADC`/`SBB` carry‑in cases distinguished from their `ADD`/
+  `SUB` counterparts; logical ops pinned on CF/AF/OF clearing and SF
+  from bit 7 vs bit 15; disassembler mnemonics for the eight fields per
+  opcode; the CLI's `group1_or_executes_to_halt` exercises `81 /1`
+  end‑to‑end.
+
 - Core: byte-width group 1 — `ADD/SUB/CMP r/m8, imm8` (`80 /0`, `80 /5`,
   `80 /7`). `80` shares the `81`/`83` decode path and leaves those
   encodings unchanged; its immediate is a raw byte, unlike `83`'s, which is
