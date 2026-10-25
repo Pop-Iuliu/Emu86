@@ -8,5 +8,6 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     exclude: [...configDefaults.exclude, "e2e/**"],
+    css: { modules: { classNameStrategy: "non-scoped" } },
   },
 });
