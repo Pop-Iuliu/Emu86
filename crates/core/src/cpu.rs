@@ -126,6 +126,13 @@ impl Cpu {
         Ok(())
     }
 
+    /// `80`/`81`/`83 /0`–`/7`: ADD, OR, ADC, SBB, AND, SUB, XOR, CMP.
+    ///
+    /// `80` is the byte form (raw `imm8`), `81` is the word form (`imm16`),
+    /// and `83` is the word form with a sign-extended `imm8`. CF is read
+    /// before the resulting flags are written back, so `adc`/`sbb` consume
+    /// the previous instruction's carry. `/7` (CMP) computes SUB's flags
+    /// without writing the destination.
     fn alu_rm_imm(&mut self, op: u8) -> Result<(), StepError> {
         let modrm = self.fetch8();
         let alu_op = (modrm >> 3) & 0b111;

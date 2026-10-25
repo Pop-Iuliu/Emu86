@@ -12,6 +12,12 @@
 //! effective addresses with the default segment implied by the base
 //! register. Relative jumps render as absolute offset targets, the way
 //! NASM labels would appear.
+//!
+//! Group-1 mnemonics (`add` / `or` / `adc` / `sbb` / `and` / `sub` / `xor` /
+//! `cmp`) are rendered for all three opcode bytes `80` / `81` / `83`. The
+//! `83` immediate renders as signed decimal (a hand-written `0xFF` reads as
+//! `-1`) to match NASM, while the `80` / `81` immediates stay `0x`-prefixed
+//! hex.
 
 use crate::mem::{Memory, MEM_SIZE};
 
