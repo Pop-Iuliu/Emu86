@@ -339,17 +339,14 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_form_reports_error() {
-        let mut cpu = cpu_with(&[0x81, 0xC8, 0x34, 0x12], 0xFFFF, 0x0000);
+    fn group1_or_executes_to_halt() {
+        // 81 /1 = OR r/m16, imm16. Previously an UnsupportedForm; now runs.
+        let mut cpu = cpu_with(&[0x81, 0xC8, 0x00, 0x0F, 0xF4], 0xFFFF, 0x0000);
+        cpu.regs.set_reg(Reg16::Ax, 0x00F0);
         let result = run(&mut cpu, 100, false);
-        assert!(matches!(
-            result.outcome,
-            Outcome::Error(RunError {
-                cs: 0xFFFF,
-                ip: 0x0000,
-                err: StepError::UnsupportedForm { .. },
-            })
-        ));
+        assert!(matches!(result.outcome, Outcome::Halted));
+        assert_eq!(result.steps, 2);
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0FF0);
     }
 
     #[test]
