@@ -78,20 +78,14 @@ pub fn add8(a: u8, b: u8) -> (u8, u16) {
     let r = a.wrapping_add(b);
     let cf = (a as u16) + (b as u16) > 0xFF;
     let of = !(a ^ b) & (a ^ r) & 0x80 != 0;
-    (
-        r,
-        flag_bits(a as u16, b as u16, r as u16, cf, of, 0x0080),
-    )
+    (r, flag_bits(a as u16, b as u16, r as u16, cf, of, 0x0080))
 }
 
 pub fn sub8(a: u8, b: u8) -> (u8, u16) {
     let r = a.wrapping_sub(b);
     let cf = a < b;
     let of = (a ^ b) & (a ^ r) & 0x80 != 0;
-    (
-        r,
-        flag_bits(a as u16, b as u16, r as u16, cf, of, 0x0080),
-    )
+    (r, flag_bits(a as u16, b as u16, r as u16, cf, of, 0x0080))
 }
 
 /// 8-bit sibling of `adc`; flags are width-correct (CF/OF from bit 7).
@@ -99,10 +93,7 @@ pub fn adc8(a: u8, b: u8, carry: u8) -> (u8, u16) {
     let r = a.wrapping_add(b).wrapping_add(carry);
     let cf = (a as u16) + (b as u16) + (carry as u16) > 0xFF;
     let of = !(a ^ b) & (a ^ r) & 0x80 != 0;
-    (
-        r,
-        flag_bits(a as u16, b as u16, r as u16, cf, of, 0x0080),
-    )
+    (r, flag_bits(a as u16, b as u16, r as u16, cf, of, 0x0080))
 }
 
 /// 8-bit sibling of `sbb`; flags are width-correct (CF/OF from bit 7).
@@ -110,10 +101,7 @@ pub fn sbb8(a: u8, b: u8, carry: u8) -> (u8, u16) {
     let r = a.wrapping_sub(b).wrapping_sub(carry);
     let cf = (a as u16) < (b as u16) + (carry as u16);
     let of = (a ^ b) & (a ^ r) & 0x80 != 0;
-    (
-        r,
-        flag_bits(a as u16, b as u16, r as u16, cf, of, 0x0080),
-    )
+    (r, flag_bits(a as u16, b as u16, r as u16, cf, of, 0x0080))
 }
 
 /// 8-bit sibling of `and`; SF from bit 7, ZF over 8 bits.

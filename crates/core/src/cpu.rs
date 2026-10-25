@@ -798,5 +798,4 @@ mod tests {
         // PF (0xFF parity) | SF (bit 15 of 0xFFFF).
         assert_eq!(cpu.flags.bits(), 0xF086);
     }
-
 }
