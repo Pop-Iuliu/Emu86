@@ -33,8 +33,8 @@ web-test: web-install
 web-build: wasm-build web-install
     pnpm --dir web build
 
-web-e2e: web-build
-    pnpm --dir web exec playwright install --with-deps
+web-e2e: wasm-build
+    pnpm --dir web exec playwright install chromium
     pnpm --dir web e2e
 
 asm:
