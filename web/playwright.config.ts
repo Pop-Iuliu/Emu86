@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  use: { ...devices["Desktop Chrome"] },
+  use: { ...devices["Desktop Chrome"], baseURL: "http://localhost:5173" },
   webServer: {
     command: "pnpm dev --port 5173 --strictPort",
     port: 5173,

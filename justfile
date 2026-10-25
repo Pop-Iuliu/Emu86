@@ -30,6 +30,10 @@ web-lint:
 web-build: wasm-build web-install
     pnpm --dir web build
 
+web-e2e: web-build
+    pnpm --dir web exec playwright install --with-deps
+    pnpm --dir web e2e
+
 asm:
     for f in tests/programs/*.asm; do nasm -O0 -f bin -o "${f%.asm}.bin" "$f"; done
 
@@ -42,3 +46,4 @@ ci:
     just wasm-build
     just web-lint
     just web-build
+    just web-e2e
