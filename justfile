@@ -27,8 +27,15 @@ web-install:
 web-lint:
     pnpm --dir web lint
 
+web-test: web-install
+    pnpm --dir web test
+
 web-build: wasm-build web-install
     pnpm --dir web build
+
+web-e2e: wasm-build
+    pnpm --dir web exec playwright install chromium
+    pnpm --dir web e2e
 
 asm:
     for f in tests/programs/*.asm; do nasm -O0 -f bin -o "${f%.asm}.bin" "$f"; done
@@ -40,5 +47,7 @@ ci:
     just check
     just asm-verify
     just wasm-build
+    just web-test
     just web-lint
     just web-build
+    just web-e2e

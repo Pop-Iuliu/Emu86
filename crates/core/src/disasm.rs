@@ -399,9 +399,13 @@ mod tests {
 
     #[test]
     fn byte_alu_immediate_consumes_exactly_its_bytes() {
-        let insns = disassemble(&mem_with_at(0, &[0x80, 0x47, 0xFE, 0x01]), 0x0000, 0x0000, 3);
+        let insns = disassemble(
+            &mem_with_at(0, &[0x80, 0x47, 0xFE, 0x01]),
+            0x0000,
+            0x0000,
+            3,
+        );
         assert_eq!(insns[0].bytes, vec![0x80, 0x47, 0xFE, 0x01]);
         assert_eq!(insns[1].off, 0x0004);
     }
-
 }
