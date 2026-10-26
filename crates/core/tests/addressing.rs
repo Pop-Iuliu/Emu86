@@ -390,50 +390,6 @@ fn unknown_opcode_is_reported() {
 }
 
 #[test]
-fn unsupported_group_extension_reports_ip_and_bytes() {
-    let mut cpu = loaded(&[0x81, 0xC8, 0x34, 0x12]); // 81 /1 (OR r/m16, imm16)
-    assert_eq!(
-        cpu.step(),
-        Err(StepError::UnsupportedForm {
-            ip: 0x0000,
-            bytes: vec![0x81, 0xC8],
-        })
-    );
-    assert_eq!(cpu.ip, 0x0002);
-}
-
-#[test]
-fn unsupported_byte_group_extension_reports_ip_and_bytes() {
-    let mut cpu = loaded(&[0x80, 0xC8, 0x01]); // 80 /1 (OR r/m8, imm8)
-    assert_eq!(
-        cpu.step(),
-        Err(StepError::UnsupportedForm {
-            ip: 0x0000,
-            bytes: vec![0x80, 0xC8],
-        })
-    );
-    assert_eq!(cpu.ip, 0x0002);
-}
-
-#[test]
-fn group1_extensions_other_than_add_sub_cmp_are_unsupported() {
-    for op in [0x80u8, 0x81, 0x83] {
-        for reg in [1u8, 2, 3, 4, 6] {
-            let modrm = 0b11_000_000 | (reg << 3);
-            let mut cpu = loaded(&[op, modrm]);
-            assert_eq!(
-                cpu.step(),
-                Err(StepError::UnsupportedForm {
-                    ip: 0x0000,
-                    bytes: vec![op, modrm],
-                }),
-                "op {op:#04x} group field {reg}"
-            );
-        }
-    }
-}
-
-#[test]
 fn byte_alu_sub_sets_sf_from_bit_seven() {
     // SUB byte [0x0010], 1 -> 0x00 - 1 = 0xFF, which is negative at byte
     // width. The word-width flag maths the CPU used before 0x80 existed

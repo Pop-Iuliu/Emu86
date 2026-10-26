@@ -2,13 +2,58 @@
 
 Each `.asm` is restricted to `cpu 8086` (NASM rejects 386+ mnemonics) and to
 the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
-`ADD/SUB/CMP r/m16, imm` (`81 /0`, `81 /5`, `81 /7`, `83 /0`, `83 /5`,
-`83 /7`), `ADD/SUB/CMP r/m8, imm8` (`80 /0`, `80 /5`, `80 /7`),
+`ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m16, imm` (`81 /0`–`/7`,
+`83 /0`–`/7`), `ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m8, imm8` (`80 /0`–`/7`),
 `MOV` between r/m and reg for byte and word (`88`–`8B`),
 `ADD AX, imm16` (`05 iw`), `SUB/CMP AX, imm16` (`2D iw`, `3D iw`),
 `JMP short/near` (`EB`, `E9`), `JE/JNE short` (`74`/`75`), `HLT` (`F4`).
-NASM is invoked with `-O0` so `add ax, imm` assembles to the canonical
-`05 iw` form rather than the r/m form `83 /0`.
+
+Two traps follow from that list. NASM is invoked with `-O0` so `add ax, imm`
+assembles to the canonical `05 iw` form rather than `81 /0`; the accumulator
+form is what a hand-written `add ax, imm` actually produces, so it has to be
+implemented for the source to run. The accumulator forms for the non-`ADD`/
+`SUB`/`CMP` group-1 fields (`0D`, `15`, `1D`, `25`, `35`) are also
+unimplemented; `or ax, imm` therefore has to be written as `or bx, imm`
+(encoded `81 /1`) or another explicit r/m target. And the byte accumulator
+forms (`04`, `0C`, `14`, `1C`, `24`, `2C`, `34`, `3C`) are *not*
+implemented, so `add al, imm8`, `or al, imm8`, `adc al, imm8` and their
+siblings raise `UnknownOpcode` — NASM encodes those as `04`, `0C`, `14`,
+and so on. Targeting any non-`AL` register (`add bl, imm8`) or a memory
+operand assembles to `80 /0`, which works.
+
+## Group 1 semantics
+
+The eight `/N` fields of `80`/`81`/`83` share operand decoding, immediate
+width and instruction length — only the ALU operation differs:
+
+| `/N` | Mnemonic | Reads prior CF | CF after op  | OF after op     | AF after op  | SF/ZF/PF |
+| ---- | -------- | -------------- | ------------ | --------------- | ------------ | -------- |
+| 0    | `add`    | no             | carry out    | signed overflow | bit-3 carry  | result   |
+| 1    | `or`     | no             | 0            | 0               | 0            | result   |
+| 2    | `adc`    | yes            | carry out    | signed overflow | bit-3 carry  | result   |
+| 3    | `sbb`    | yes            | borrow       | signed overflow | bit-3 borrow | result   |
+| 4    | `and`    | no             | 0            | 0               | 0            | result   |
+| 5    | `sub`    | no             | borrow       | signed overflow | bit-3 borrow | result   |
+| 6    | `xor`    | no             | 0            | 0               | 0            | result   |
+| 7    | `cmp`    | no             | as `sub`     | as `sub`        | as `sub`     | result   |
+
+Only `adc` and `sbb` read CF from the previous instruction, so a
+`cmp …` followed by `adc ax, 0` adds one extra via the carry. The
+logical operators (`or`/`and`/`xor`) always clear CF/AF/OF — a stray
+carry cannot leak past them. `cmp` computes `sub`'s flags but leaves
+its destination untouched; every other `/N` writes the result.
+
+| Opcode | Width | Immediate interpretation                          |
+| ------ | ----- | ------------------------------------------------- |
+| `80`   | byte  | raw `imm8`, never sign-extended (`0xFF` = +255)   |
+| `81`   | word  | `imm16` verbatim                                  |
+| `83`   | word  | sign-extended `imm8` (`0xFF` = `0xFFFF`, `0x7F` = `0x007F`) |
+
+NASM uses `83` when the immediate fits in −128..127 — `add bx, -1`
+assembles to `83 C3 FF`, but `add bx, 0x100` assembles to `81 C3 00 01`.
+A fixture that writes `or al, imm` or `adc ax, imm` will hit the
+accumulator gap noted above (`0C` / `15`); write an explicit r/m
+target instead (`or bl, imm` → `80 /1`, `adc bx, imm` → `81 /2`).
 
 Binaries (`.bin`) are committed flat images loaded at reset state
 `CS:IP = FFFF:0000` (physical `0xFFFF0`). The browser **Load binary…** control accepts the
