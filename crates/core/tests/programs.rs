@@ -55,6 +55,7 @@ fn programs_match_expected_results() {
         "memory",
         "loop",
         "countdown",
+        "call",
     ] {
         let bin = std::fs::read(format!("{PROGRAM_DIR}/{name}.bin")).unwrap();
         let expected = std::fs::read_to_string(format!("{PROGRAM_DIR}/{name}.expected")).unwrap();
@@ -90,6 +91,7 @@ fn replay_produces_identical_results() {
         "memory",
         "loop",
         "countdown",
+        "call",
     ] {
         let bin = std::fs::read(format!("{PROGRAM_DIR}/{name}.bin")).unwrap();
 
@@ -225,6 +227,96 @@ fn countdown_program_hits_checkpoints() {
 #[test]
 fn step_error_for_unknown_is_exhaustive() {
     let mut cpu = Cpu::new();
-    cpu.load_flat(0xFFFF, 0x0000, &[0x0F]);
-    assert_eq!(cpu.step(), Err(StepError::UnknownOpcode(0x0F)));
+    cpu.load_flat(0xFFFF, 0x0000, &[0x60]);
+    assert_eq!(cpu.step(), Err(StepError::UnknownOpcode(0x60)));
+}
+
+#[test]
+fn call_program_uses_planned_encodings() {
+    let bin = std::fs::read(format!("{PROGRAM_DIR}/call.bin")).unwrap();
+    assert_eq!(&bin[0x00..0x03], &[0xB8, 0x01, 0x00]);
+    assert_eq!(&bin[0x03..0x06], &[0xBB, 0xAA, 0x00]);
+    assert_eq!(&bin[0x06..0x09], &[0xB9, 0xBB, 0x00]);
+    assert_eq!(bin[0x09], 0x53);
+    assert_eq!(bin[0x0A], 0x51);
+    assert_eq!(&bin[0x0B..0x0E], &[0xE8, 0x01, 0x00]);
+    assert_eq!(bin[0x0E], 0xF4);
+    assert_eq!(&bin[0x0F..0x12], &[0xE8, 0x03, 0x00]);
+    assert_eq!(&bin[0x12..0x15], &[0xC2, 0x04, 0x00]);
+    assert_eq!(&bin[0x15..0x18], &[0x55, 0x89, 0xE5]);
+    assert_eq!(&bin[0x18..0x1B], &[0x8B, 0x56, 0x06]);
+    assert_eq!(&bin[0x1B..0x1E], &[0x8B, 0x4E, 0x08]);
+    assert_eq!(&bin[0x1E..0x20], &[0x5D, 0xC3]);
+    assert_eq!(bin.len(), 0x20);
+}
+
+#[test]
+fn call_program_hits_checkpoints() {
+    let bin = std::fs::read(format!("{PROGRAM_DIR}/call.bin")).unwrap();
+    let mut cpu = Cpu::new();
+    cpu.load_flat(0xFFFF, 0x0000, &bin);
+
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0001);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Bx), 0x00AA);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Cx), 0x00BB);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFFE, "push bx");
+    assert_eq!(cpu.mem.read_word(0xFFFE), 0x00AA);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFFC, "push cx");
+    assert_eq!(cpu.mem.read_word(0xFFFC), 0x00BB);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFFA, "call outer");
+    assert_eq!(
+        cpu.mem.read_word(0xFFFA),
+        0x000E,
+        "return address is after the call"
+    );
+    assert_eq!(cpu.ip, 0x000F);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFF8, "call inner");
+    assert_eq!(cpu.mem.read_word(0xFFF8), 0x0012);
+    assert_eq!(cpu.ip, 0x0015);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFF6, "push bp");
+    assert_eq!(cpu.mem.read_word(0xFFF6), 0x0000);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Bp), 0xFFF6, "mov bp, sp");
+    cpu.step().unwrap();
+    assert_eq!(
+        cpu.regs.reg(Reg16::Dx),
+        0x00BB,
+        "[bp+6] reads the last-pushed argument"
+    );
+    cpu.step().unwrap();
+    assert_eq!(
+        cpu.regs.reg(Reg16::Cx),
+        0x00AA,
+        "[bp+8] reads the first argument"
+    );
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Bp), 0x0000, "pop bp");
+    assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFF8);
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x0012, "inner rets into outer");
+    assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFFA);
+    cpu.step().unwrap();
+    assert_eq!(cpu.ip, 0x000E, "ret 4 lands after the outer call");
+    assert_eq!(
+        cpu.regs.reg(Reg16::Sp),
+        0x0000,
+        "return address plus two arguments dropped"
+    );
+    cpu.step().unwrap();
+    assert!(cpu.halted);
+    assert_eq!(cpu.ip, 0x000F);
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0001);
+    assert_eq!(
+        cpu.flags.bits(),
+        0xF002,
+        "stack traffic never touches flags"
+    );
 }

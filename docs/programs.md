@@ -6,7 +6,11 @@ the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
 `83 /0`–`/7`), `ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m8, imm8` (`80 /0`–`/7`),
 `MOV` between r/m and reg for byte and word (`88`–`8B`),
 `ADD AX, imm16` (`05 iw`), `SUB/CMP AX, imm16` (`2D iw`, `3D iw`),
-`JMP short/near` (`EB`, `E9`), `JE/JNE short` (`74`/`75`), `HLT` (`F4`).
+`JMP short/near` (`EB`, `E9`), `JE/JNE short` (`74`/`75`), `HLT` (`F4`),
+stack primitives `PUSH/POP r16` (`50`–`5F`), segment pushes/pops
+(`06`/`07`, `0E`/`0F`, `16`/`17`, `1E`/`1F` — `0F` is the 8086-only
+`POP CS`), `PUSHF/POPF` (`9C`/`9D`) and near calls
+`CALL rel16` (`E8`), `RET imm16` (`C2`), `RET` (`C3`).
 
 Two traps follow from that list. NASM is invoked with `-O0` so `add ax, imm`
 assembles to the canonical `05 iw` form rather than `81 /0`; the accumulator
@@ -77,6 +81,7 @@ always read as 1).
 | `memory`      | RAM roundtrip                | `BEEF`     | `F093`      | `0xBEEF` stored at `DS:0020`, `+0x1111` → `0xD000`, `byte -1` sign-extends to `0xFFFF` → borrow; result loaded into `CX` = `0xD001` |
 | `loop`        | flags drive a counted loop   | `0006`     | `F046`      | 3× `add ax, 2` / `sub cx, 1` / `cmp cx, 0` with a `jne top` back-edge; the final `cmp` sets ZF, so `jne` falls through to `hlt` — flags decide repeat vs continue |
 | `countdown`   | browser demo — terminating countdown | `0003` | `F046`  | `AX = 3` stored at `DS:0020`; `83 /5` decrements the word 3→2→1→0; `83 /7` compare raises ZF at 0; backward `75` branch exits; `CX` (pre-set `FFFF`) loads the final 0 |
+| `call`        | nested calls with stack arguments | `0001` | `F002`    | two args pushed, `call outer` → `call inner`; `inner` reads them through a BP frame (`push bp` / `mov bp, sp`, `[bp+6]`/`[bp+8]`); `outer` cleans up with `ret 4`; `AX` sentinel survives, SP unwinds to its start |
 
 `wrap` byte layout: 16 bytes fill `0xFFFF0..0xFFFFF` exactly; the
 immediate of `MOV AX, 0x1234` and the `HLT` wrap to `0x0000..0x0001`.
@@ -141,6 +146,50 @@ subtracting −1 borrows because the immediate is the full `0xFFFF`, not
 Encodings (verified by `memory_program_uses_planned_encodings`, offsets
 matter for the final `ip`): store `89 07`, add `81 07 11 11` (imm16 form),
 sub `83 2F FF` (imm8 form), load `8B 0F`, hlt `F4` — 18 bytes total.
+
+## The `call` demonstration
+
+A core fixture for the stack: two levels of near calls with stack-passed
+arguments and a `RET imm16` cleanup. `SS = 0` at reset, so the stack grows
+down from physical `0x0000` (offsets `FFFE`, `FFFC`, …) while the program
+sits at `FFFF:0000` — the two never meet.
+
+Story: **main pushes two arguments → `call outer` → `call inner` → inner
+reads the arguments through a BP frame → both returns unwind → `ret 4`
+drops the arguments → `AX` sentinel survives → halt.**
+
+| After                    | ip     | State                                                                                     |
+| ------------------------ | ------ | ----------------------------------------------------------------------------------------- |
+| `mov ax, 0x0001`         | `0003` | sentinel, never touched afterwards                                                        |
+| `mov bx, 0x00AA`         | `0006` | first argument                                                                            |
+| `mov cx, 0x00BB`         | `0009` | second argument                                                                           |
+| `push bx`                | `000A` | `SP = FFFE`, word `00AA` at `0000:FFFE`                                                    |
+| `push cx`                | `000B` | `SP = FFFC`, word `00BB` on top                                                            |
+| `call outer`             | `000F` | `SP = FFFA`, return address `000E` pushed, `IP = 000F`                                     |
+| `call inner`             | `0015` | `SP = FFF8`, return address `0012` pushed — two return addresses above the args            |
+| `push bp` / `mov bp, sp` | `0018` | `BP = FFF6`; args now at `[bp+6]` and `[bp+8]`                                             |
+| `mov dx, [bp+6]`         | `001B` | `DX = 00BB` — the last-pushed argument sits at the lower address                           |
+| `mov cx, [bp+8]`         | `001E` | `CX = 00AA`                                                                                |
+| `pop bp` / `ret`         | `0012` | frame torn down, `SP = FFFA`; inner returns into `outer`                                   |
+| `ret 4`                  | `000E` | pops `outer`'s return address *and* adds 4: `SP = 0000`, both arguments dropped             |
+| `hlt`                    | `000F` | halted, `AX = 0001`, flags `F002` — stack traffic never touches flags                      |
+
+Encodings (verified by `call_program_uses_planned_encodings`): calls
+`E8 01 00` / `E8 03 00`, cleanup `C2 04 00`, frame `55 89 E5`, arg loads
+`8B 56 06` / `8B 4E 08` (`MOV r16, [bp+d8]`), `pop bp`/`ret` `5D C3` —
+32 bytes total. The checkpoint test asserts SP, the pushed return
+addresses and the BP-frame reads at every step; replay determinism
+re-runs the same fixture from reset.
+
+## The PUSH SP quirk
+
+On the 8086, `PUSH SP` (`54`) stores the **decremented** stack pointer,
+not the original value: with `SP = 0x1234`, the word `0x1232` lands at
+`SS:0x1230`. Processors from the 286 on store the original `0x1234` —
+the unit test `push_sp_pushes_the_new_sp_8086_quirk` pins the 8086
+behaviour, and the SingleStepTests hardware corpus (sprint 05) doubles
+as a second opinion. Its mirror image, `POP SP` (`5C`), discards the
+usual `+2`: the popped value becomes SP outright.
 
 ## Replay determinism
 

@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn error_reports_the_rejected_instruction() {
-        let mut cpu = cpu_with(&[0x0F]);
+        let mut cpu = cpu_with(&[0x60]);
         let result = cpu.run(100, &BTreeSet::new());
         assert_eq!(result.steps, 0);
         assert_eq!(
@@ -178,7 +178,7 @@ mod tests {
             RunStop::Error {
                 cs: 0xFFFF,
                 ip: 0x0000,
-                err: StepError::UnknownOpcode(0x0F),
+                err: StepError::UnknownOpcode(0x60),
             }
         );
     }

@@ -65,6 +65,21 @@ impl Cpu {
         (self.fetch8() as u16) << 8 | lo
     }
 
+    fn push_word(&mut self, v: u16) {
+        let sp = self.regs.reg(Reg16::Sp).wrapping_sub(2);
+        self.regs.set_reg(Reg16::Sp, sp);
+        let addr = Memory::linear(self.regs.seg(Seg::Ss), sp);
+        self.mem.write_word(addr, v);
+    }
+
+    fn pop_word(&mut self) -> u16 {
+        let sp = self.regs.reg(Reg16::Sp);
+        let addr = Memory::linear(self.regs.seg(Seg::Ss), sp);
+        let v = self.mem.read_word(addr);
+        self.regs.set_reg(Reg16::Sp, sp.wrapping_add(2));
+        v
+    }
+
     pub fn step(&mut self) -> Result<(), StepError> {
         if self.halted {
             return Err(StepError::Halted);
@@ -83,6 +98,78 @@ impl Cpu {
             }
             0x80 | 0x81 | 0x83 => self.alu_rm_imm(op)?,
             0x88..=0x8B => self.mov_rm_reg(op),
+            0x50..=0x57 => {
+                let r = Reg16::from_index(op - 0x50);
+                let v = if r == Reg16::Sp {
+                    self.regs.reg(Reg16::Sp).wrapping_sub(2)
+                } else {
+                    self.regs.reg(r)
+                };
+                self.push_word(v);
+            }
+            0x58..=0x5F => {
+                let r = Reg16::from_index(op - 0x58);
+                let v = self.pop_word();
+                self.regs.set_reg(r, v);
+            }
+            0x06 => {
+                let v = self.regs.seg(Seg::Es);
+                self.push_word(v);
+            }
+            0x07 => {
+                let v = self.pop_word();
+                self.regs.set_seg(Seg::Es, v);
+            }
+            0x0E => {
+                let v = self.regs.seg(Seg::Cs);
+                self.push_word(v);
+            }
+            0x0F => {
+                let v = self.pop_word();
+                self.regs.set_seg(Seg::Cs, v);
+            }
+            0x16 => {
+                let v = self.regs.seg(Seg::Ss);
+                self.push_word(v);
+            }
+            0x17 => {
+                let v = self.pop_word();
+                self.regs.set_seg(Seg::Ss, v);
+            }
+            0x1E => {
+                let v = self.regs.seg(Seg::Ds);
+                self.push_word(v);
+            }
+            0x1F => {
+                let v = self.pop_word();
+                self.regs.set_seg(Seg::Ds, v);
+            }
+            0x9C => {
+                let v = self.flags.bits();
+                self.push_word(v);
+            }
+            0x9D => {
+                let v = self.pop_word();
+                self.flags.set_bits(v);
+            }
+            0xE8 => {
+                let disp = self.fetch16();
+                let ret_off = self.ip;
+                let target = self.ip.wrapping_add(disp);
+                self.push_word(ret_off);
+                self.ip = target;
+            }
+            0xC2 => {
+                let imm = self.fetch16();
+                let ret_off = self.pop_word();
+                self.ip = ret_off;
+                self.regs
+                    .set_reg(Reg16::Sp, self.regs.reg(Reg16::Sp).wrapping_add(imm));
+            }
+            0xC3 => {
+                let ret_off = self.pop_word();
+                self.ip = ret_off;
+            }
             0x05 => {
                 let imm = self.fetch16();
                 let (r, f) = alu::add(self.regs.reg(Reg16::Ax), imm);
@@ -300,8 +387,9 @@ mod tests {
 
     #[test]
     fn unknown_opcode_is_reported_not_panicked() {
-        let mut cpu = cpu_with(&[0x0F]);
-        assert_eq!(cpu.step(), Err(StepError::UnknownOpcode(0x0F)));
+        // 0x60 is not an 8086 opcode; 0x0F decodes as POP CS.
+        let mut cpu = cpu_with(&[0x60]);
+        assert_eq!(cpu.step(), Err(StepError::UnknownOpcode(0x60)));
         assert_eq!(cpu.ip, RESET_OFF + 1);
     }
 
@@ -797,5 +885,265 @@ mod tests {
         assert_eq!(cpu.regs.reg(Reg16::Ax), 0xFFFF);
         // PF (0xFF parity) | SF (bit 15 of 0xFFFF).
         assert_eq!(cpu.flags.bits(), 0xF086);
+    }
+
+    // -----------------------------------------------------------------------
+    // Stack primitives: PUSH/POP r16 (50-57, 58-5F), segment pushes/pops
+    // (06/07, 0E/0F, 16/17, 1E/1F), PUSHF/POPF (9C/9D). All stack traffic
+    // goes through SS:SP with 16-bit offset wrap.
+    // -----------------------------------------------------------------------
+
+    fn stack_cpu(sp: u16) -> Cpu {
+        let mut cpu = cpu_with(&[]);
+        cpu.regs.set_seg(Seg::Ss, 0x2000);
+        cpu.regs.set_reg(Reg16::Sp, sp);
+        cpu
+    }
+
+    #[test]
+    fn push_pop_round_trip_all_registers() {
+        // SP has dedicated quirk tests below (PUSH stores the new value,
+        // POP takes the loaded value outright).
+        for i in [0u8, 1, 2, 3, 5, 6, 7] {
+            let r = Reg16::from_index(i);
+            let mut cpu = stack_cpu(0x0100);
+            cpu.regs.set_reg(r, 0xBEEF);
+            cpu.load_flat(0xFFFF, 0x0000, &[0x50 + i, 0x58 + i]);
+            cpu.step().unwrap();
+            assert_eq!(cpu.regs.reg(Reg16::Sp), 0x00FE, "{i}: push");
+            cpu.step().unwrap();
+            assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0100, "{i}: pop");
+            assert_eq!(cpu.regs.reg(r), 0xBEEF, "{i}: value restored");
+        }
+    }
+
+    #[test]
+    fn push_decrements_sp_and_writes_via_ss() {
+        let mut cpu = stack_cpu(0x0100);
+        cpu.regs.set_reg(Reg16::Bx, 0x1234);
+        cpu.load_flat(0xFFFF, 0x0000, &[0x53]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x00FE);
+        assert_eq!(cpu.mem.read_word(Memory::linear(0x2000, 0x00FE)), 0x1234);
+        assert_eq!(cpu.ip, RESET_OFF + 1);
+    }
+
+    #[test]
+    fn pop_reads_via_ss_and_increments_sp() {
+        let mut cpu = stack_cpu(0x0100);
+        cpu.mem.write_word(Memory::linear(0x2000, 0x0100), 0x5A5A);
+        cpu.load_flat(0xFFFF, 0x0000, &[0x58]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x5A5A);
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0102);
+        assert_eq!(cpu.ip, RESET_OFF + 1);
+    }
+
+    #[test]
+    fn push_wraps_sp_below_zero() {
+        let mut cpu = stack_cpu(0x0000);
+        cpu.regs.set_reg(Reg16::Ax, 0x0102);
+        cpu.load_flat(0xFFFF, 0x0000, &[0x50]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFFE);
+        assert_eq!(cpu.mem.read_word(Memory::linear(0x2000, 0xFFFE)), 0x0102);
+    }
+
+    #[test]
+    fn pop_wraps_sp_above_top() {
+        let mut cpu = stack_cpu(0xFFFE);
+        cpu.mem.write_word(Memory::linear(0x2000, 0xFFFE), 0x3344);
+        cpu.load_flat(0xFFFF, 0x0000, &[0x58]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x3344);
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0000);
+    }
+
+    #[test]
+    fn push_sp_pushes_the_new_sp_8086_quirk() {
+        // 8086 PUSH SP stores the decremented SP, not the original.
+        // On 286+ the original value is stored; this pins 8086 behaviour.
+        let mut cpu = stack_cpu(0x1234);
+        cpu.load_flat(0xFFFF, 0x0000, &[0x54]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x1232);
+        assert_eq!(
+            cpu.mem.read_word(Memory::linear(0x2000, 0x1232)),
+            0x1232,
+            "the word stored is the NEW sp"
+        );
+    }
+
+    #[test]
+    fn pop_sp_takes_the_popped_value() {
+        // POP SP discards the +2: the loaded value becomes SP outright.
+        let mut cpu = stack_cpu(0x0100);
+        cpu.mem.write_word(Memory::linear(0x2000, 0x0100), 0xBEEF);
+        cpu.load_flat(0xFFFF, 0x0000, &[0x5C]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0xBEEF);
+    }
+
+    #[test]
+    fn segment_registers_push_and_pop_all_four() {
+        let mut cpu = stack_cpu(0x0100);
+        // SS holds the live stack segment: pushing and popping it must
+        // restore the value, or the later pops would read elsewhere.
+        // CS likewise round-trips its own fetch-segment value.
+        cpu.regs.set_seg(Seg::Es, 0x1111);
+        cpu.regs.set_seg(Seg::Ds, 0x4444);
+        // push es, push cs, push ss, push ds,
+        // then pop ds, pop ss, pop cs, pop es — reverse order.
+        cpu.load_flat(
+            0xFFFF,
+            0x0000,
+            &[0x06, 0x0E, 0x16, 0x1E, 0x1F, 0x17, 0x0F, 0x07],
+        );
+        for _ in 0..8 {
+            cpu.step().unwrap();
+        }
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0100);
+        assert_eq!(cpu.regs.seg(Seg::Es), 0x1111);
+        assert_eq!(cpu.regs.seg(Seg::Cs), 0xFFFF);
+        assert_eq!(cpu.regs.seg(Seg::Ss), 0x2000);
+        assert_eq!(cpu.regs.seg(Seg::Ds), 0x4444);
+    }
+
+    #[test]
+    fn pop_cs_switches_the_code_segment() {
+        let mut cpu = stack_cpu(0x0010);
+        cpu.mem.write_word(Memory::linear(0x2000, 0x0010), 0x2000);
+        cpu.regs.set_seg(Seg::Cs, 0x0000);
+        cpu.mem.load(0x00000, &[0x0F]);
+        cpu.mem.load(0x20001, &[0xF4]);
+        cpu.ip = 0x0000;
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.seg(Seg::Cs), 0x2000);
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0012);
+        assert_eq!(cpu.ip, 0x0001);
+        cpu.step().unwrap();
+        assert!(cpu.halted, "next fetch ran from the new CS");
+    }
+
+    #[test]
+    fn pushf_popf_round_trip_writable_flags() {
+        let mut cpu = stack_cpu(0x0100);
+        cpu.flags.set(Flags::CF, true);
+        cpu.flags.set(Flags::ZF, true);
+        cpu.load_flat(0xFFFF, 0x0000, &[0x9C, 0x9D]);
+        cpu.step().unwrap();
+        assert_eq!(
+            cpu.mem.read_word(Memory::linear(0x2000, 0x00FE)),
+            0xF043,
+            "CF | ZF on the static base"
+        );
+        cpu.flags.set(Flags::CF, false);
+        cpu.flags.set(Flags::ZF, false);
+        cpu.step().unwrap();
+        assert!(cpu.flags.get(Flags::CF));
+        assert!(cpu.flags.get(Flags::ZF));
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0100);
+    }
+
+    #[test]
+    fn push_and_pop_leave_flags_unchanged() {
+        let mut cpu = stack_cpu(0x0100);
+        cpu.regs.set_reg(Reg16::Bx, 0x0001);
+        cpu.load_flat(0xFFFF, 0x0000, &[0x53, 0x5B, 0x06, 0x07, 0x9C]);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        let before = cpu.flags.bits();
+        cpu.step().unwrap();
+        assert_eq!(
+            cpu.flags.bits(),
+            before,
+            "pushf reads flags without writing"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Near call and return: CALL rel16 (E8), RET imm16 (C2), RET (C3).
+    // Return addresses live on the SS:SP stack; IP arithmetic wraps at 16
+    // bits. No flags are touched.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn call_pushes_return_address_and_jumps() {
+        let mut cpu = cpu_with(&[0xE8, 0x05, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0xF4]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x0008);
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFFE);
+        assert_eq!(cpu.mem.read_word(0xFFFE), 0x0003);
+        cpu.step().unwrap();
+        assert!(cpu.halted, "call reached the hlt");
+        assert_eq!(cpu.ip, 0x0009);
+    }
+
+    #[test]
+    fn call_target_wraps_ip_at_16_bits() {
+        let mut cpu = Cpu::new();
+        cpu.regs.set_seg(Seg::Cs, 0x0000);
+        cpu.mem.load(0xFFF0, &[0xE8, 0xFF, 0x7F]);
+        cpu.ip = 0xFFF0;
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x7FF2);
+        assert_eq!(cpu.mem.read_word(0xFFFE), 0xFFF3);
+    }
+
+    #[test]
+    fn ret_pops_return_address() {
+        let mut cpu = cpu_with(&[0xC3]);
+        cpu.regs.set_reg(Reg16::Sp, 0x0100);
+        cpu.mem.write_word(0x0100, 0x0210);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x0210);
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0102);
+    }
+
+    #[test]
+    fn ret_imm_drops_stack_arguments() {
+        let mut cpu = cpu_with(&[0xC2, 0x04, 0x00]);
+        cpu.regs.set_reg(Reg16::Sp, 0x0100);
+        cpu.mem.write_word(0x0100, 0x0210);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x0210);
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0106);
+    }
+
+    #[test]
+    fn nested_call_and_ret_unwind_sp() {
+        let mut cpu = cpu_with(&[
+            0xE8, 0x04, 0x00, // call 0x0007
+            0xF4, // hlt (return lands here)
+            0x90, 0x90, 0x90, // padding
+            0xE8, 0x02, 0x00, // call 0x000C
+            0xC3, // ret -> 0x0003
+            0x90, // padding
+            0xC3, // ret -> 0x000A
+        ]);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFFE);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0xFFFC);
+        cpu.step().unwrap();
+        assert_eq!(cpu.ip, 0x000A, "inner ret returns into outer");
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0000, "stack fully unwound");
+        cpu.step().unwrap();
+        assert!(cpu.halted);
+        assert_eq!(cpu.ip, 0x0004);
+    }
+
+    #[test]
+    fn call_and_ret_leave_flags_unchanged() {
+        let mut cpu = cpu_with(&[0xE8, 0x03, 0x00, 0xF4, 0x90, 0x90, 0xC3]);
+        cpu.step().unwrap();
+        let before = cpu.flags.bits();
+        cpu.step().unwrap();
+        assert_eq!(cpu.flags.bits(), before);
+        assert_eq!(cpu.ip, RESET_OFF + 3);
+        assert_eq!(cpu.regs.reg(Reg16::Sp), 0x0000);
     }
 }

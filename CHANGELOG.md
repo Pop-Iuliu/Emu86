@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core: **stack and near calls** — `PUSH/POP r16` (`50`–`5F`), the four
+  segment pushes/pops (`06`/`07`, `0E`/`0F`, `16`/`17`, `1E`/`1F`,
+  including the 8086-only `POP CS` at `0F`), `PUSHF`/`POPF`
+  (`9C`/`9D`), and near control transfer `CALL rel16` (`E8`),
+  `RET imm16` (`C2`) and `RET` (`C3`). All stack traffic flows through
+  `SS:SP` with 16-bit offset wrap in both directions (`SP = 0` pushing
+  lands the word at `SS:FFFE`). `PUSH SP` stores the *decremented* SP —
+  the 8086 behaviour that changed with the 286 — and `POP SP` discards
+  the usual `+2`, loading the popped value into SP outright. `PUSHF`
+  pushes the flags word as read (static bits included); `POPF` writes
+  through the writable mask, so static bits survive. Calls push the
+  offset just past the instruction; returns take the 16-bit IP wrap.
+  Nothing in the stack family touches flags.
+- Tests: stack and calls — `Cpu::step` unit tests round-trip every
+  stack register through push+pop, pin both SP quirks, the SS:SP
+  addressing and SP wrap at both ends, the four segment registers,
+  `POPF`'s writable-mask round trip, `CALL`'s pushed return address and
+  16-bit target wrap, `RET imm16` argument dropping and a two-level
+  nested call's full unwind; the disassembler renders all new mnemonics
+  (`push`/`pop` with register and segment names, `pushf`/`popf`,
+  `call 0xXXXX` as an absolute target, `ret` / `ret 0xXXXX`) and pins
+  byte counts against the CPU. New NASM fixture `call` — nested calls
+  with two stack arguments read through a BP frame and dropped by
+  `ret 4`, checkpointed step-by-step (SP walk, return addresses,
+  `[bp+6]`/`[bp+8]` reads) and folded into the expected-results and
+  replay loops.
+- Web: Vitest + React Testing Library for the frontend — component
+  tests for the debugger UI (registers, flags, execution panel,
+  controls) and hook tests for `useEmulator`, running under jsdom with
+  the same register-format toggle the UI ships. CI gained a Vitest step
+  in the web job, and the justfile a `web-test` recipe wired ahead of
+  `web-lint` so `node_modules` is installed first.
+
+### Fixed
+
+- CI: the web job's Playwright install runs without sudo, and the
+  committed `pnpm-lock.yaml` now matches `package.json` after the test
+  dependencies landed — `pnpm install --frozen-lockfile` in CI passes.
+
 - Core: **group 1 completion** — all eight fields `/0`–`/7` now
   execute for `80`, `81` and `83`, so `ADD`, `OR`, `ADC`, `SBB`,
   `AND`, `SUB`, `XOR` and `CMP` are available at both widths. `83`'s

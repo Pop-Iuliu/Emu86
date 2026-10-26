@@ -379,8 +379,8 @@ mod tests {
 
     #[test]
     fn an_unhandled_opcode_stops_the_batch_with_an_error() {
-        // 0F is outside the implemented instruction slice for this phase.
-        let mut cpu = cpu_with(&[0x0F]);
+        // 0x60 is not an 8086 opcode (PUSHA is 186+); 0x0F decodes as POP CS.
+        let mut cpu = cpu_with(&[0x60]);
         let (outcome, error) = run_steps(&mut cpu, 8);
         assert_eq!(outcome, BatchOutcome::Error);
         assert!(error.unwrap().contains("unknown opcode"));

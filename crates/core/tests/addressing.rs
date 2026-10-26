@@ -384,8 +384,8 @@ fn word_load_at_top_of_memory_wraps() {
 
 #[test]
 fn unknown_opcode_is_reported() {
-    let mut cpu = loaded(&[0x06]); // PUSH ES: not implemented yet
-    assert_eq!(cpu.step(), Err(StepError::UnknownOpcode(0x06)));
+    let mut cpu = loaded(&[0x60]); // not an 8086 opcode (PUSHA is 186+)
+    assert_eq!(cpu.step(), Err(StepError::UnknownOpcode(0x60)));
     assert_eq!(cpu.ip, 0x0001);
 }
 

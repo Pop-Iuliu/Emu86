@@ -24,6 +24,7 @@ use crate::mem::{Memory, MEM_SIZE};
 const W16: [&str; 8] = ["ax", "cx", "dx", "bx", "sp", "bp", "si", "di"];
 const B8: [&str; 8] = ["al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"];
 const RM_BASE: [&str; 8] = ["bx+si", "bx+di", "bp+si", "bp+di", "si", "di", "bp", "bx"];
+const SEG_NAME: [&str; 4] = ["es", "cs", "ss", "ds"];
 
 /// Upper bound on instructions per call, so a bogus `max` from the UI
 /// cannot stall the worker.
@@ -103,6 +104,19 @@ fn decode(op: u8, fetch8: Fetch8<'_>, ip_after: &dyn Fn() -> u32) -> Option<Stri
             let target = ip_after().wrapping_add(disp as u32) & 0xFFFF;
             Some(format!("{mnem} 0x{target:04X}"))
         }
+        0x50..=0x57 => Some(format!("push {}", W16[(op - 0x50) as usize])),
+        0x58..=0x5F => Some(format!("pop {}", W16[(op - 0x58) as usize])),
+        0x06 | 0x0E | 0x16 | 0x1E => Some(format!("push {}", SEG_NAME[(op >> 3) as usize & 3])),
+        0x07 | 0x0F | 0x17 | 0x1F => Some(format!("pop {}", SEG_NAME[(op >> 3) as usize & 3])),
+        0x9C => Some("pushf".to_string()),
+        0x9D => Some("popf".to_string()),
+        0xE8 => {
+            let disp = fetch16(fetch8);
+            let target = ip_after().wrapping_add(disp as u32) & 0xFFFF;
+            Some(format!("call 0x{target:04X}"))
+        }
+        0xC2 => Some(format!("ret 0x{:04X}", fetch16(fetch8))),
+        0xC3 => Some("ret".to_string()),
         0xE9 | 0xEB => {
             let disp = if op == 0xE9 {
                 fetch16(fetch8)
@@ -279,9 +293,10 @@ mod tests {
 
     #[test]
     fn hlt_and_unknown_bytes() {
+        // 0x60 is not an 8086 opcode (PUSHA is 186+); 0x0F is now POP CS.
         assert_eq!(
-            texts(&[0xF4, 0x0F, 0xFF], 3),
-            vec!["hlt", "db 0x0F", "db 0xFF"]
+            texts(&[0xF4, 0x60, 0xFF], 3),
+            vec!["hlt", "db 0x60", "db 0xFF"]
         );
     }
 
@@ -374,10 +389,10 @@ mod tests {
 
     #[test]
     fn db_is_one_byte_and_does_not_desynchronize() {
-        // 0F is unknown; the listing skips exactly one byte and recovers.
+        // 0x60 is unknown; the listing skips exactly one byte and recovers.
         assert_eq!(
-            texts(&[0x0F, 0xB8, 0x34, 0x12], 2),
-            vec!["db 0x0F", "mov ax, 0x1234"]
+            texts(&[0x60, 0xB8, 0x34, 0x12], 2),
+            vec!["db 0x60", "mov ax, 0x1234"]
         );
     }
 
@@ -407,5 +422,51 @@ mod tests {
         );
         assert_eq!(insns[0].bytes, vec![0x80, 0x47, 0xFE, 0x01]);
         assert_eq!(insns[1].off, 0x0004);
+    }
+
+    #[test]
+    fn push_pop_registers_render_nasm_names() {
+        assert_eq!(
+            texts(&[0x50, 0x54, 0x57, 0x58, 0x5C, 0x5F], 6),
+            vec!["push ax", "push sp", "push di", "pop ax", "pop sp", "pop di",]
+        );
+    }
+
+    #[test]
+    fn segment_and_flag_pushes_render() {
+        assert_eq!(
+            texts(
+                &[0x06, 0x07, 0x0E, 0x0F, 0x16, 0x17, 0x1E, 0x1F, 0x9C, 0x9D],
+                10
+            ),
+            vec![
+                "push es", "pop es", "push cs", "pop cs", "push ss", "pop ss", "push ds", "pop ds",
+                "pushf", "popf",
+            ]
+        );
+    }
+
+    #[test]
+    fn call_renders_absolute_target_and_ret_variants() {
+        //   0: E8 03 00  after=3 -> 6
+        //   3: C2 04 00  ret 0x0004
+        //   6: C3        ret
+        assert_eq!(
+            texts(&[0xE8, 0x03, 0x00, 0xC2, 0x04, 0x00, 0xC3], 3),
+            vec!["call 0x0006", "ret 0x0004", "ret"]
+        );
+    }
+
+    #[test]
+    fn call_bytes_match_what_step_consumes() {
+        let insns = disassemble(
+            &mem_with_at(0, &[0xE8, 0x03, 0x00, 0xC2, 0x04, 0x00]),
+            0x0000,
+            0x0000,
+            2,
+        );
+        assert_eq!(insns[0].bytes, vec![0xE8, 0x03, 0x00]);
+        assert_eq!(insns[1].off, 0x0003);
+        assert_eq!(insns[1].bytes, vec![0xC2, 0x04, 0x00]);
     }
 }

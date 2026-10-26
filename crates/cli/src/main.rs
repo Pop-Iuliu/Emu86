@@ -326,14 +326,14 @@ mod tests {
 
     #[test]
     fn unknown_opcode_reports_instruction_address() {
-        let mut cpu = cpu_with(&[0x0F], 0xFFFF, 0x0100);
+        let mut cpu = cpu_with(&[0x60], 0xFFFF, 0x0100);
         let result = run(&mut cpu, 100, false);
         assert!(matches!(
             result.outcome,
             Outcome::Error(RunError {
                 cs: 0xFFFF,
                 ip: 0x0100,
-                err: StepError::UnknownOpcode(0x0F),
+                err: StepError::UnknownOpcode(0x60),
             })
         ));
     }
