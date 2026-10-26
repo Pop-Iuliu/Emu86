@@ -76,6 +76,34 @@
   opacity: 0.6;
 }
 
+.panelHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.panelHeader h2 {
+  margin: 0;
+}
+
+.formatSelect {
+  font-family: inherit;
+  font-size: 0.75rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+  cursor: pointer;
+}
+
+.formatSelect:focus-visible {
+  outline: 2px solid #ffcf3f;
+  outline-offset: 2px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -84,6 +112,10 @@
 
 .grid + .grid {
   margin-top: 0.4rem;
+}
+
+.gridWide {
+  grid-template-columns: repeat(2, 1fr);
 }
 
 .cell {
@@ -100,6 +132,7 @@
   font-weight: bold;
   font-variant-numeric: tabular-nums;
   padding: 0 0.2rem;
+  white-space: nowrap;
 }
 
 .changed .value {
