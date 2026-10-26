@@ -313,6 +313,9 @@ fn instruction_lengths_advance_ip() {
         (&[0x83, 0x2E, 0x00, 0x10, 0xFF, 0xF4], 6),       // SUB [0x1000], imm8
         (&[0xB8, 0x34, 0x12, 0xF4], 4),                   // MOV AX, imm16
         (&[0xB4, 0x12, 0xF4], 3),                         // MOV AH, imm8
+        (&[0x80, 0x07, 0x10, 0xF4], 4),                   // ADD byte [BX], imm8
+        (&[0x80, 0x47, 0x02, 0x10, 0xF4], 5),             // ADD byte [BX+2], imm8
+        (&[0x80, 0xC3, 0x10, 0xF4], 4),                   // ADD BL, imm8
     ];
 
     for &(code, end) in cases {
@@ -400,17 +403,47 @@ fn unsupported_group_extension_reports_ip_and_bytes() {
 }
 
 #[test]
+fn unsupported_byte_group_extension_reports_ip_and_bytes() {
+    let mut cpu = loaded(&[0x80, 0xC8, 0x01]); // 80 /1 (OR r/m8, imm8)
+    assert_eq!(
+        cpu.step(),
+        Err(StepError::UnsupportedForm {
+            ip: 0x0000,
+            bytes: vec![0x80, 0xC8],
+        })
+    );
+    assert_eq!(cpu.ip, 0x0002);
+}
+
+#[test]
 fn group1_extensions_other_than_add_sub_cmp_are_unsupported() {
-    for reg in [1u8, 2, 3, 4, 6] {
-        let modrm = 0b11_000_000 | (reg << 3);
-        let mut cpu = loaded(&[0x81, modrm, 0x00, 0x00]);
-        assert_eq!(
-            cpu.step(),
-            Err(StepError::UnsupportedForm {
-                ip: 0x0000,
-                bytes: vec![0x81, modrm],
-            }),
-            "group field {reg}"
-        );
+    for op in [0x80u8, 0x81, 0x83] {
+        for reg in [1u8, 2, 3, 4, 6] {
+            let modrm = 0b11_000_000 | (reg << 3);
+            let mut cpu = loaded(&[op, modrm]);
+            assert_eq!(
+                cpu.step(),
+                Err(StepError::UnsupportedForm {
+                    ip: 0x0000,
+                    bytes: vec![op, modrm],
+                }),
+                "op {op:#04x} group field {reg}"
+            );
+        }
     }
+}
+
+#[test]
+fn byte_alu_sub_sets_sf_from_bit_seven() {
+    // SUB byte [0x0010], 1 -> 0x00 - 1 = 0xFF, which is negative at byte
+    // width. The word-width flag maths the CPU used before 0x80 existed
+    // would have reported SF clear here.
+    let mut cpu = loaded(&[0x80, 0x2E, 0x10, 0x00, 0x01, 0xF4]);
+    cpu.mem.write(0x0010, 0x00);
+    cpu.step().expect("SUB should execute");
+    assert_eq!(cpu.mem.read(0x0010), 0xFF);
+    assert!(cpu.flags.get(Flags::CF));
+    assert!(cpu.flags.get(Flags::SF));
+    assert!(!cpu.flags.get(Flags::ZF));
+    assert_eq!(cpu.ip, 5);
 }

@@ -107,7 +107,7 @@ fn decode(op: u8, fetch8: Fetch8<'_>, ip_after: &dyn Fn() -> u32) -> Option<Stri
             Some(format!("jmp 0x{target:04X}"))
         }
         0xF4 => Some("hlt".to_string()),
-        0x81 | 0x83 => {
+        0x80 | 0x81 | 0x83 => {
             let modrm = fetch8();
             let mnem = match (modrm >> 3) & 0b111 {
                 0 => "add",
@@ -116,11 +116,12 @@ fn decode(op: u8, fetch8: Fetch8<'_>, ip_after: &dyn Fn() -> u32) -> Option<Stri
                 _ => return None,
             };
             let (md, _reg, rm) = modrm_fields(modrm);
-            let rm_text = rm_text(md, rm, true, fetch8)?;
-            let imm = if op == 0x81 {
-                format!("0x{:04X}", fetch16(fetch8))
-            } else {
-                format!("{}", fetch8() as i8)
+            let wide = op != 0x80;
+            let rm_text = rm_text(md, rm, wide, fetch8)?;
+            let imm = match op {
+                0x81 => format!("0x{:04X}", fetch16(fetch8)),
+                0x83 => format!("{}", fetch8() as i8),
+                _ => format!("0x{:02X}", fetch8()),
             };
             Some(format!("{mnem} {rm_text}, {imm}"))
         }
@@ -374,5 +375,34 @@ mod tests {
             texts(&[0x0F, 0xB8, 0x34, 0x12], 2),
             vec!["db 0x0F", "mov ax, 0x1234"]
         );
+    }
+
+    #[test]
+    fn byte_alu_immediate_forms() {
+        assert_eq!(
+            texts(&[0x80, 0x07, 0x10, 0x80, 0xC3, 0xFF, 0x80, 0x3F, 0x05], 3),
+            vec!["add [bx], 0x10", "add bl, 0xFF", "cmp [bx], 0x05"]
+        );
+    }
+
+    #[test]
+    fn byte_alu_immediate_with_disp_keeps_listing_in_sync() {
+        assert_eq!(
+            texts(&[0x80, 0x47, 0xFE, 0x01, 0xF4], 2),
+            vec!["add [bx-2], 0x01", "hlt"]
+        );
+    }
+
+    #[test]
+    fn byte_alu_immediate_consumes_exactly_its_bytes() {
+        let insns = disassemble(&mem_with_at(0, &[0x80, 0x47, 0xFE, 0x01]), 0x0000, 0x0000, 3);
+        assert_eq!(insns[0].bytes, vec![0x80, 0x47, 0xFE, 0x01]);
+        assert_eq!(insns[1].off, 0x0004);
+    }
+
+    #[test]
+    fn byte_alu_with_unsupported_operator_is_db() {
+        // 0x80 /1 = OR — the CPU raises UnsupportedForm, the listing says db.
+        assert_eq!(texts(&[0x80, 0xC8, 0x01], 1), vec!["db 0x80"]);
     }
 }

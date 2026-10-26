@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core: byte-width group 1 — `ADD/SUB/CMP r/m8, imm8` (`80 /0`, `80 /5`,
+  `80 /7`). `80` shares the `81`/`83` decode path and leaves those
+  encodings unchanged; its immediate is a raw byte, unlike `83`'s, which is
+  sign-extended. The ALU flag helper is now width-aware: byte results
+  derive CF from bit 7, ZF over 8 bits, and SF/OF from bit 7, closing a
+  latent bug in which a byte `0 − 1` would have computed as a word and
+  reported SF clear. The disassembler renders `80` immediates as
+  two-digit unsigned hex and consumes exactly the bytes the CPU does for
+  all three forms.
+
+- Tests: byte-width ALU — `alu` unit tests pin the byte flag arithmetic
+  (`0xFF + 1`, `0x7F + 1`, `0 − 1`, `0x80 − 1`, including the two cases
+  where PF is clear); `cpu` tests drive `80 /0` `/5` `/7` through
+  `Cpu::step` and assert the SF-from-bit-7 regression against an exact
+  FLAGS word; `addressing` covers instruction lengths, the unsupported
+  group fields across `80`/`81`/`83`, and an end-to-end byte `sub`; the
+  disassembler pins its listing length against what `step` consumes.
+
 - Web: **Run** and **Pause** — bounded execution in a Web Worker. The
   emulator runs instructions in small batches (`run_batch(1024)`) and
   yields between batches, so Pause and Reset stay responsive against a
