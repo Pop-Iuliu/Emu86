@@ -17,7 +17,7 @@ jobs:
     name: rust (fmt, clippy, test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2, installs just
         with:
           tool: just
@@ -31,7 +31,7 @@ jobs:
     name: wasm (wasm-pack build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2, installs just
         with:
           tool: just
@@ -47,7 +47,7 @@ jobs:
     name: web (lint, typecheck, build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2, installs just
         with:
           tool: just
