@@ -1,29 +1,33 @@
 # Program tests
 
 Each `.asm` is restricted to `cpu 8086` (NASM rejects 386+ mnemonics) and to
-the opcodes emu86 currently decodes: `MOV reg, imm` (`B0+r`/`B8+r`),
-`ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m16, imm` (`81 /0`–`/7`,
-`83 /0`–`/7`), `ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m8, imm8` (`80 /0`–`/7`),
-`MOV` between r/m and reg for byte and word (`88`–`8B`),
-`ADD AX, imm16` (`05 iw`), `SUB/CMP AX, imm16` (`2D iw`, `3D iw`),
-`JMP short/near` (`EB`, `E9`), `JE/JNE short` (`74`/`75`), `HLT` (`F4`),
-stack primitives `PUSH/POP r16` (`50`–`5F`), segment pushes/pops
-(`06`/`07`, `0E`/`0F`, `16`/`17`, `1E`/`1F` — `0F` is the 8086-only
-`POP CS`), `PUSHF/POPF` (`9C`/`9D`) and near calls
-`CALL rel16` (`E8`), `RET imm16` (`C2`), `RET` (`C3`).
+the opcodes emu86 currently decodes:
 
-Two traps follow from that list. NASM is invoked with `-O0` so `add ax, imm`
-assembles to the canonical `05 iw` form rather than `81 /0`; the accumulator
-form is what a hand-written `add ax, imm` actually produces, so it has to be
-implemented for the source to run. The accumulator forms for the non-`ADD`/
-`SUB`/`CMP` group-1 fields (`0D`, `15`, `1D`, `25`, `35`) are also
-unimplemented; `or ax, imm` therefore has to be written as `or bx, imm`
-(encoded `81 /1`) or another explicit r/m target. And the byte accumulator
-forms (`04`, `0C`, `14`, `1C`, `24`, `2C`, `34`, `3C`) are *not*
-implemented, so `add al, imm8`, `or al, imm8`, `adc al, imm8` and their
-siblings raise `UnknownOpcode` — NASM encodes those as `04`, `0C`, `14`,
-and so on. Targeting any non-`AL` register (`add bl, imm8`) or a memory
-operand assembles to `80 /0`, which works.
+- `MOV reg, imm` (`B0+r`/`B8+r`), `MOV` between r/m and reg for byte and
+  word (`88`–`8B`).
+- The full group-1 ALU set — ADD, OR, ADC, SBB, AND, SUB, XOR, CMP — in
+  three shapes: register/memory ↔ register both directions (`00`–`3B`
+  bytes x0–x3: opcode bit 1 = direction, bit 0 = width), the
+  accumulator-immediate family (`04`–`3D`: fixed AL/AX, raw `imm8` per
+  byte op, full `imm16` per word op) and `r/m, imm` (`80`/`81`/`83 /0`–`/7`
+  with `83` sign-extending its immediate).
+- `INC/DEC r16` (`40`–`4F`), `INC/DEC r/m` via `FE /0 /1` and `FF /0 /1`
+  (CF untouched, all other arithmetic flags set).
+- `JMP short/near` (`EB`, `E9`), all sixteen `Jcc short` (`70`–`7F` —
+  including the signed pair `JL/JGE/JLE/JG` that tests SF against OF),
+  `LOOP/LOOPE/LOOPNE` (`E2`/`E1`/`E0`), `HLT` (`F4`).
+- Stack primitives `PUSH/POP r16` (`50`–`5F`), segment pushes/pops
+  (`06`/`07`, `0E`/`0F`, `16`/`17`, `1E`/`1F` — `0F` is the 8086-only
+  `POP CS`), `PUSHF/POPF` (`9C`/`9D`), and near calls `CALL rel16` (`E8`),
+  `RET imm16` (`C2`), `RET` (`C3`).
+
+Two NASM quirks follow from that list. NASM is invoked with `-O0` so
+`add ax, imm` assembles to the canonical `05 iw` accumulator form (then
+`81 /0 iw`), which is what a hand-written `add ax, imm` actually produces;
+the accumulator family covers every group-1 field, so any
+`<op> ax/al, imm` source is safe. For `r/m, imm` forms NASM still picks
+`81`/`80`/`83` automatically — `add bx, -1` assembles to `83 C3 FF`
+(sign-extended), while `add bx, 0x100` is `81 C3 00 01`.
 
 ## Group 1 semantics
 
@@ -55,9 +59,42 @@ its destination untouched; every other `/N` writes the result.
 
 NASM uses `83` when the immediate fits in −128..127 — `add bx, -1`
 assembles to `83 C3 FF`, but `add bx, 0x100` assembles to `81 C3 00 01`.
-A fixture that writes `or al, imm` or `adc ax, imm` will hit the
-accumulator gap noted above (`0C` / `15`); write an explicit r/m
-target instead (`or bl, imm` → `80 /1`, `adc bx, imm` → `81 /2`).
+
+The operand-carrier base bytes (`00`–`3B`, shapes x0–x3) carry the same
+eight operations with two extra bit decisions straight in the opcode:
+bit 0 = width, bit 1 = direction (1 = the register field is the
+destination). One dispatch (`opcode >> 3 & 7`) routes every form —
+immediate, accumulator and register/memory — to the same ALU helpers, so
+the flag word for `add al, 01` is byte-for-byte the one `80 /0 01`
+produces. The accumulator slots (`04`–`3D`, shapes x4/x5) keep AL/AX as
+the fixed destination: byte immediates are raw bytes, word immediates are
+full `imm16`.
+
+## INC/DEC — the pro-carrier ops
+
+`INC r/m` and `DEC r/m` (`40`–`4F`, `FE /0 /1`, `FF /0 /1`) run
+`add`/`sub` by one for every flag *except* CF: OF, SF, ZF, AF and PF
+follow the by-one arithmetic bit-for-bit, while CF is never written —
+the carry the previous instruction produced survives the increment.
+That property is pinned as a table test (`inc == add(x, 1)` /
+`dec == sub(x, 1)` for every flag except CF across wrap and overflow
+boundaries, byte and word).
+
+## Signed jumps and the loop family
+
+The sixteen short jumps (`70`–`7F`) test one condition each; the
+unsigned rows read CF/ZF (CF, ZF, CF|ZF and their inverses), parity and
+sign rows read their single flag, and the signed rows `JL`/`JGE`/`JLE`
+/`JG` compare SF against OF explicitly (`7D` takes when SF == OF, `7E`
+when ZF is set *or* SF ≠ OF, `7F` when ¬ZF *and* SF == OF). They leave
+flags untouched and consume exactly two bytes.
+
+`LOOP` (`E2`) decrements CX and re-enters while it is non-zero — with
+no flag write of any kind, so flags the body wrote survive the back
+edge (`LOOPE`/`LOOPNE` (`E1`/`E0`) layer a ZF requirement on top).
+That makes `loop` the flags-apart sibling of the `jne`-driven `loop`
+fixture: same count, same adds, but the flag word is the last `add`'s,
+not a compare's.
 
 Binaries (`.bin`) are committed flat images loaded at reset state
 `CS:IP = FFFF:0000` (physical `0xFFFF0`). The browser **Load binary…** control accepts the
@@ -80,6 +117,7 @@ always read as 1).
 | `wrap`        | 1 MiB fetch/load wrapping  | `1234`     | `F002`      | program's last 3 bytes straddle `0xFFFFF`→`0x0`; 8086 has no A20 gate, addresses wrap (see ADR-0001)  |
 | `memory`      | RAM roundtrip                | `BEEF`     | `F093`      | `0xBEEF` stored at `DS:0020`, `+0x1111` → `0xD000`, `byte -1` sign-extends to `0xFFFF` → borrow; result loaded into `CX` = `0xD001` |
 | `loop`        | flags drive a counted loop   | `0006`     | `F046`      | 3× `add ax, 2` / `sub cx, 1` / `cmp cx, 0` with a `jne top` back-edge; the final `cmp` sets ZF, so `jne` falls through to `hlt` — flags decide repeat vs continue |
+| `loopreg`     | LOOP re-enters on CX itself  | `0006`     | `F006`      | the `loop` fixture's sibling: 3× `add ax, 2` with a real `E2` back-edge; LOOP decrements CX without touching flags, so the flag word is the last add's (6 → PF) — exactly what the `jne` sibling cannot show |
 | `countdown`   | browser demo — terminating countdown | `0003` | `F046`  | `AX = 3` stored at `DS:0020`; `83 /5` decrements the word 3→2→1→0; `83 /7` compare raises ZF at 0; backward `75` branch exits; `CX` (pre-set `FFFF`) loads the final 0 |
 | `call`        | nested calls with stack arguments | `0001` | `F002`    | two args pushed, `call outer` → `call inner`; `inner` reads them through a BP frame (`push bp` / `mov bp, sp`, `[bp+6]`/`[bp+8]`); `outer` cleans up with `ret 4`; `AX` sentinel survives, SP unwinds to its start |
 
@@ -180,6 +218,37 @@ Encodings (verified by `call_program_uses_planned_encodings`): calls
 32 bytes total. The checkpoint test asserts SP, the pushed return
 addresses and the BP-frame reads at every step; replay determinism
 re-runs the same fixture from reset.
+
+## The `loopreg` demonstration
+
+The `loop` fixture's sibling that swings on the real `LOOP` opcode
+instead of a compare-and-branch. Both count the same way — `AX` walks
+`0 → 2 → 4 → 6` over three trips — but the mechanism differs: `loop`
+drives the counted loop with the register instruction, the compare
+never happens, and the flag word is whatever the last `add` left.
+
+| After                   | ip     | State                                                              |
+| ----------------------- | ------ | ------------------------------------------------------------------ |
+| `mov cx, 0x0003`        | `0003` | the trip counter                                                    |
+| `mov ax, 0x0000`        | `0006` | accumulator for the sum                                            |
+| `add ax, 0x0002`        | `0009` | `0 → 2`; flags `F002` (low byte `02` has odd parity, so PF clear)   |
+| `loop top` (taken)      | `0006` | CX `3 → 2`, flags unchanged — LOOP never writes them                |
+| `add`, `loop`           | `0006` | `2 → 4`; back-edge taken again with CX `2 → 1`                      |
+| `add`                   | `0009` | `4 → 6`, flags `F002 → F006` (PF set: `06` has two bits)            |
+| `loop` (CX drains)      | `000B` | CX `1 → 0`, falls through, `F006` untouched                         |
+| `hlt`                   | `000C` | halted, `AX = 0006`, `CX = 0000`                                    |
+
+That final `F006` is the whole point: the flag word belongs to the last
+`add`, because `loop` cannot smear anything else onto it. The `jne`
+fixture's `F046`, by contrast, is the `cmp cx, 0` verdict — the pair
+makes the store-vs-compute split of flag ownership visible.
+
+Encodings (verified by `loopreg_program_uses_planned_encodings`): counts
+`B9 03 00`, `B8 00 00`, sum `05 02 00` (accumulator immediate), back-edge
+`E2 FB` (disp8 `FB` = −5 from `000B`), `F4` — 12 bytes total. The
+checkpoint test asserts ip, AX, CX and the flag word at every step,
+recording that `loop` re-enters `0006` leaving the `add`'s flags intact,
+and replay determinism re-runs the same fixture from reset.
 
 ## The PUSH SP quirk
 

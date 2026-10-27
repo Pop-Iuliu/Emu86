@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core: **the operand-carrier ALU families** — the 32 register/memory
+  forms `00`–`3B` (bytes x0–x3), the 16 accumulator-immediate forms
+  `04`–`3D` (bytes x4/x5, AL/AX with a raw `imm8` / full `imm16`) and
+  `80`–`83` all ride one group-1 dispatch (`opcode >> 3 & 7` for the
+  operation, bit 0 = width, bit 1 = direction or the ModRM `/N` field),
+  so `add al, 01`, `00 /0 01` and `80 /0 01` share byte-for-byte the
+  same flag word. `CMP` keeps its flags-only write rule in every shape.
+- Core: **INC/DEC — the pro-carrier ops** — `INC/DEC r16` (`40`–`4F`),
+  `INC/DEC r/m8` (`FE /0 /1`) and `INC/DEC r/m16` (`FF /0 /1`): OF, SF,
+  ZF, AF and PF follow add/sub-by-one exactly while CF is never
+  written, pinned by table tests (`inc == add(x, 1)` | `dec == sub(x,
+  1)` for every flag except CF over wrap/overflow/parity edge values at
+  both widths). Unimplemented `FE`/`FF` fields (`/2`–`/7`) report
+  `StepError::UnsupportedForm` with the instruction address and
+  consumed bytes.
+- Core: **the full short-jump set** (`70`–`7F`) and the **loop family**
+  (`E2 LOOP`, plus `E1 LOOPE`/`E0 LOOPNE`): the sixteen conditions are
+  one indexed table (`jl`/`jge`/`jle`/`jg` compare SF against OF
+  explicitly), LOOP decrements CX with no flag write of any kind and
+  jumps on a non-zero (wrapping) CX, and LOOPE/LOOPNE layer the ZF
+  requirement on top.
+- Disasm: every new family renders — the eight group-1 mnemonics for
+  the r/m-r forms ordered by the direction bit and for the accumulator
+  slots, `inc`/`dec` with a `word`/`byte` size hint for memory
+  operands, `INC/DEC r`, all sixteen `Jcc`, and `loop`/`loope`/`loopne`
+  as absolute offset targets — with instruction lengths pinned against
+  the byte consumption of tests.
+- Tests: operand-carrier sweeps — every one of the 48 ALU forms plus
+  24 r/m-r opcode bytes routed through `Cpu::step` with one
+  (destination, source) pair per width, compared against the same
+  helpers the immediate path uses; CF pre-set on all rows so ADC/SBB
+  cannot pass for ADD/SUB; exact flag-word pins for the
+  direction-heavy cases and the CMP preserve rule; the full Jcc
+  taken/declined table for all sixteen conditions; the LOOP/LOOPE/
+  LOOPNE decline semantics (CX sinks even on the decline) and the
+  CX = 0 wrap; the `FE/FF` unsupported-field byte report.
+- Tests: `loopreg` — the `loop` fixture's sibling that swings on the
+  real `E2` back-edge: same count (`AX` 0 → 6 over three trips), but
+  no compare and no flag smearing, so the final flag word `F006` is
+  the last `add`'s (PF from even parity) rather than the `jne`
+  sibling's compare verdict (`F046`). Encodings pinned
+  (`E2 FB` = disp8 −5), checkpoints assert ip/AX/CX/flags per step
+  including that a taken back-edge leaves the add's flags intact;
+  folded into the expected-results and replay loops and the
+  disassembler's full-listing test.
+
 - Core: **stack and near calls** — `PUSH/POP r16` (`50`–`5F`), the four
   segment pushes/pops (`06`/`07`, `0E`/`0F`, `16`/`17`, `1E`/`1F`,
   including the 8086-only `POP CS` at `0F`), `PUSHF`/`POPF`

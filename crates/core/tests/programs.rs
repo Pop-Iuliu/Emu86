@@ -54,6 +54,7 @@ fn programs_match_expected_results() {
         "wrap",
         "memory",
         "loop",
+        "loopreg",
         "countdown",
         "call",
     ] {
@@ -90,6 +91,7 @@ fn replay_produces_identical_results() {
         "wrap",
         "memory",
         "loop",
+        "loopreg",
         "countdown",
         "call",
     ] {
@@ -229,6 +231,58 @@ fn step_error_for_unknown_is_exhaustive() {
     let mut cpu = Cpu::new();
     cpu.load_flat(0xFFFF, 0x0000, &[0x60]);
     assert_eq!(cpu.step(), Err(StepError::UnknownOpcode(0x60)));
+}
+
+#[test]
+fn loopreg_program_uses_planned_encodings() {
+    let bin = std::fs::read(format!("{PROGRAM_DIR}/loopreg.bin")).unwrap();
+    assert_eq!(&bin[0..3], &[0xB9, 0x03, 0x00]);
+    assert_eq!(&bin[3..6], &[0xB8, 0x00, 0x00]);
+    assert_eq!(&bin[6..9], &[0x05, 0x02, 0x00]);
+    assert_eq!(&bin[9..11], &[0xE2, 0xFB]);
+    assert_eq!(bin[11], 0xF4);
+    assert_eq!(bin.len(), 12);
+}
+
+#[test]
+fn loopreg_program_hits_checkpoints() {
+    let bin = std::fs::read(format!("{PROGRAM_DIR}/loopreg.bin")).unwrap();
+    let mut cpu = Cpu::new();
+    cpu.load_flat(0xFFFF, 0x0000, &bin);
+
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Cx), 0x0003);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0000);
+    assert_eq!(cpu.ip, 0x0006);
+
+    for remaining in [2u16, 1] {
+        cpu.step().unwrap();
+        let after_add = cpu.flags.bits();
+        // The immediate `add` raises PF only on even parity (2, 4) — none.
+        assert_eq!(after_add, 0xF002);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Cx), remaining);
+        // LOOP decrements CX and takes the back edge without touching the
+        // flag word the add just wrote.
+        assert_eq!(cpu.flags.bits(), after_add, "loop must not write flags");
+        assert_eq!(cpu.ip, 0x0006, "taken back to the add");
+    }
+
+    // Third trip: 4 + 2 = 6 sets PF (two bits); CX drains to 0, LOOP falls
+    // through to the hlt with the stale flags word intact.
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0006);
+    assert_eq!(cpu.flags.bits(), 0xF006);
+    cpu.step().unwrap();
+    assert_eq!(cpu.regs.reg(Reg16::Cx), 0);
+    assert_eq!(cpu.ip, 0x000B, "fell through to the hlt");
+    assert_eq!(cpu.flags.bits(), 0xF006);
+    cpu.step().unwrap();
+    assert!(cpu.halted);
+    assert_eq!(cpu.ip, 0x000C);
+    assert_eq!(cpu.regs.reg(Reg16::Cx), 0x0000);
+    assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0006);
 }
 
 #[test]

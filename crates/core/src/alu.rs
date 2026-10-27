@@ -1,3 +1,5 @@
+use crate::flags::Flags;
+
 fn flag_bits(a: u16, b: u16, r: u16, cf: bool, of: bool, sign: u16) -> u16 {
     // width = 0x8000 | 0x7FFF = 0xFFFF (word); 0x0080 | 0x007F = 0x00FF (byte).
     let width = sign | (sign - 1);
@@ -122,10 +124,36 @@ pub fn xor8(a: u8, b: u8) -> (u8, u16) {
     (r, logic_flags(r as u16, 0x0080))
 }
 
+/// `INC r/m16`: every arithmetic flag follows `add(a, 1)` — OF, AF, SF, ZF
+/// and PF included — but CF is cleared in the returned word. INC never
+/// writes CF, so the caller ORs the incoming carry back on top.
+pub fn inc(a: u16) -> (u16, u16) {
+    let (r, f) = add(a, 1);
+    (r, f & !Flags::CF)
+}
+
+/// `DEC r/m16`: every arithmetic flag follows `sub(a, 1)`; CF preserved
+/// the same way as `inc`.
+pub fn dec(a: u16) -> (u16, u16) {
+    let (r, f) = sub(a, 1);
+    (r, f & !Flags::CF)
+}
+
+/// 8-bit sibling of `inc`; OF/AF/SF/ZF/PF from bit 7 width rules.
+pub fn inc8(a: u8) -> (u8, u16) {
+    let (r, f) = add8(a, 1);
+    (r, f & !Flags::CF)
+}
+
+/// 8-bit sibling of `dec`.
+pub fn dec8(a: u8) -> (u8, u16) {
+    let (r, f) = sub8(a, 1);
+    (r, f & !Flags::CF)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flags::Flags;
 
     #[test]
     fn add_carry_and_zero() {
@@ -305,5 +333,51 @@ mod tests {
         let (r, f) = xor8(0x0F, 0x0E);
         assert_eq!(r, 0x01);
         assert_eq!(f, 0);
+    }
+
+    #[test]
+    fn inc_settable_flags_are_exactly_add_inc_one() {
+        // 0xFF wraps the low byte → AF out of bit 3; 0x7F crosses +127 → OF.
+        // CF is stripped by the helper itself (INC never writes it).
+        let (r, f) = inc(0x00FF);
+        assert_eq!(r, 0x0100);
+        assert_eq!(f, Flags::AF | Flags::PF);
+        let (r, f) = inc(0x7FFF);
+        assert_eq!(r, 0x8000);
+        assert_eq!(f, Flags::SF | Flags::OF | Flags::AF | Flags::PF);
+        let (r, f) = inc(0xFFFF);
+        assert_eq!(r, 0);
+        assert_eq!(f, Flags::ZF | Flags::AF | Flags::PF);
+    }
+
+    #[test]
+    fn dec_settable_flags_are_exactly_sub_inc_one() {
+        // 0x8000 crosses −32768 → OF; 0x0010 borrows from the low nibble → AF.
+        let (r, f) = dec(0x0000);
+        assert_eq!(r, 0xFFFF);
+        assert_eq!(f, Flags::SF | Flags::AF | Flags::PF);
+        let (r, f) = dec(0x8000);
+        assert_eq!(r, 0x7FFF);
+        assert_eq!(f, Flags::AF | Flags::PF | Flags::OF);
+    }
+
+    #[test]
+    fn inc8_settable_flags_are_exactly_add_inc_one() {
+        let (r, f) = inc8(0xFF);
+        assert_eq!(r, 0);
+        assert_eq!(f, Flags::ZF | Flags::AF | Flags::PF);
+        let (r, f) = inc8(0x7F);
+        assert_eq!(r, 0x80);
+        assert_eq!(f, Flags::SF | Flags::OF | Flags::AF);
+    }
+
+    #[test]
+    fn dec8_settable_flags_are_exactly_sub_inc_one() {
+        let (r, f) = dec8(0x00);
+        assert_eq!(r, 0xFF);
+        assert_eq!(f, Flags::SF | Flags::AF | Flags::PF);
+        let (r, f) = dec8(0x80);
+        assert_eq!(r, 0x7F);
+        assert_eq!(f, Flags::AF | Flags::OF);
     }
 }

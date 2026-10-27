@@ -84,6 +84,7 @@ impl Cpu {
         if self.halted {
             return Err(StepError::Halted);
         }
+        let start_ip = self.ip;
         let op = self.fetch8();
         match op {
             0xB8..=0xBF => {
@@ -96,6 +97,14 @@ impl Cpu {
                 let imm = self.fetch8();
                 self.regs.set_reg8(r, imm);
             }
+            // Base ALU groups 0x00/08/10/18/20/28/30/38, forms x2/x3:
+            // bit 1 = direction (1 = the register field receives), bit 0 =
+            // width. Bytes x4..x7 fall through to the accumulator family.
+            op @ 0x00..=0x3B if op & 0b100 == 0 => self.alu_rm_reg(op)?,
+            // Accumulator-immediate family `04`/`05` … `3C`/`3D`: bit 1 =
+            // width, bits 5:3 = the group-1 field, destination always AL/AX.
+            op @ 0x00..=0x3F if op & 0b110 == 0b100 => self.alu_acc_imm(op)?,
+            0x40..=0x4F => self.inc_dec_r16(op),
             0x80 | 0x81 | 0x83 => self.alu_rm_imm(op)?,
             0x88..=0x8B => self.mov_rm_reg(op),
             0x50..=0x57 => {
@@ -170,35 +179,8 @@ impl Cpu {
                 let ret_off = self.pop_word();
                 self.ip = ret_off;
             }
-            0x05 => {
-                let imm = self.fetch16();
-                let (r, f) = alu::add(self.regs.reg(Reg16::Ax), imm);
-                self.regs.set_reg(Reg16::Ax, r);
-                self.set_flag_bits(f);
-            }
-            0x2D => {
-                let imm = self.fetch16();
-                let (r, f) = alu::sub(self.regs.reg(Reg16::Ax), imm);
-                self.regs.set_reg(Reg16::Ax, r);
-                self.set_flag_bits(f);
-            }
-            0x3D => {
-                let imm = self.fetch16();
-                let (_, f) = alu::sub(self.regs.reg(Reg16::Ax), imm);
-                self.set_flag_bits(f);
-            }
-            0x74 => {
-                let disp = self.fetch8() as i8 as u16;
-                if self.flags.get(Flags::ZF) {
-                    self.ip = self.ip.wrapping_add(disp);
-                }
-            }
-            0x75 => {
-                let disp = self.fetch8() as i8 as u16;
-                if !self.flags.get(Flags::ZF) {
-                    self.ip = self.ip.wrapping_add(disp);
-                }
-            }
+            0x70..=0x7F => self.jcc(op),
+            0xE0..=0xE2 => self.loop_family(op),
             0xE9 => {
                 let disp = self.fetch16();
                 self.ip = self.ip.wrapping_add(disp);
@@ -207,6 +189,7 @@ impl Cpu {
                 let disp = self.fetch8() as i8 as u16;
                 self.ip = self.ip.wrapping_add(disp);
             }
+            0xFE | 0xFF => self.inc_dec_rm(op, start_ip)?,
             0xF4 => self.halted = true,
             op => return Err(StepError::UnknownOpcode(op)),
         }
@@ -236,40 +219,213 @@ impl Cpu {
         // ADC/SBB see the CF produced by the previous instruction.
         let carry = u16::from(self.flags.get(Flags::CF));
         let a = dst.read(&self.regs, &self.mem);
-        let (r, f) = if wide {
-            match alu_op {
-                0 => alu::add(a, imm),
-                1 => alu::or(a, imm),
-                2 => alu::adc(a, imm, carry),
-                3 => alu::sbb(a, imm, carry),
-                4 => alu::and(a, imm),
-                5 => alu::sub(a, imm),
-                6 => alu::xor(a, imm),
-                _ => alu::sub(a, imm), // /7 = CMP: flags only
-            }
-        } else {
-            // `Operand::read` zero-extends, so narrow back to u8 before the
-            // byte-width flag maths runs.
-            let a8 = a as u8;
-            let imm8 = imm as u8;
-            let carry8 = carry as u8;
-            let (r, f) = match alu_op {
-                0 => alu::add8(a8, imm8),
-                1 => alu::or8(a8, imm8),
-                2 => alu::adc8(a8, imm8, carry8),
-                3 => alu::sbb8(a8, imm8, carry8),
-                4 => alu::and8(a8, imm8),
-                5 => alu::sub8(a8, imm8),
-                6 => alu::xor8(a8, imm8),
-                _ => alu::sub8(a8, imm8), // /7 = CMP: flags only
-            };
-            (u16::from(r), f)
-        };
+        let (r, f) = Self::alu_binary(alu_op, wide, a, imm, carry);
         if alu_op != 7 {
             dst.write(&mut self.regs, &mut self.mem, r);
         }
         self.set_flag_bits(f);
         Ok(())
+    }
+
+    /// The one group-1 dispatch table: `alu_op` is always `(opcode >> 3) & 7`
+    /// (or the ModRM `/N` field), `a` is the destination value and `b` the
+    /// source. `carry` is read from CF before any flag write-back by the
+    /// caller. The `/N` index routes to exactly the same helpers as
+    /// `alu_rm_imm` — no arithmetic here computes flags a second way.
+    fn alu_binary(alu_op: u8, wide: bool, a: u16, b: u16, carry: u16) -> (u16, u16) {
+        if wide {
+            match alu_op {
+                0 => alu::add(a, b),
+                1 => alu::or(a, b),
+                2 => alu::adc(a, b, carry),
+                3 => alu::sbb(a, b, carry),
+                4 => alu::and(a, b),
+                5 => alu::sub(a, b),
+                6 => alu::xor(a, b),
+                _ => alu::sub(a, b), // /7 = CMP: flags only
+            }
+        } else {
+            // `Operand::read` zero-extends, so narrow back to u8 before the
+            // byte-width flag maths runs.
+            let (r, f) = match alu_op {
+                0 => alu::add8(a as u8, b as u8),
+                1 => alu::or8(a as u8, b as u8),
+                2 => alu::adc8(a as u8, b as u8, carry as u8),
+                3 => alu::sbb8(a as u8, b as u8, carry as u8),
+                4 => alu::and8(a as u8, b as u8),
+                5 => alu::sub8(a as u8, b as u8),
+                6 => alu::xor8(a as u8, b as u8),
+                _ => alu::sub8(a as u8, b as u8), // /7 = CMP: flags only
+            };
+            (u16::from(r), f)
+        }
+    }
+
+    /// `00`–`3B` minus the accumulator slots: ADD/OR/ADC/SBB/AND/SUB/XOR/CMP
+    /// between a register and a register or memory operand. The opcode itself
+    /// carries the group-1 field (`(op >> 3) & 7`), the direction
+    /// (bit 1 set = the register field is the destination) and the width
+    /// (bit 0). CMP (`/7`) keeps its write-to-nothing rule.
+    fn alu_rm_reg(&mut self, op: u8) -> Result<(), StepError> {
+        let modrm = self.fetch8();
+        let alu_op = (op >> 3) & 0b111;
+        let wide = op & 1 == 1;
+        let reg_receives = op & 2 == 2;
+        let rm = self.decode_rm(modrm, wide);
+        let reg = Operand::decode_reg(modrm, wide);
+        let (dst, src) = if reg_receives { (reg, rm) } else { (rm, reg) };
+        // Read the carry-in before the result's flags are written back, so
+        // ADC/SBB see the CF produced by the previous instruction.
+        let carry = u16::from(self.flags.get(Flags::CF));
+        let a = dst.read(&self.regs, &self.mem);
+        let b = src.read(&self.regs, &self.mem);
+        let (r, f) = Self::alu_binary(alu_op, wide, a, b, carry);
+        if alu_op != 7 {
+            dst.write(&mut self.regs, &mut self.mem, r);
+        }
+        self.set_flag_bits(f);
+        Ok(())
+    }
+
+    /// `04`–`3D` accumulator family: the eight group-1 fields with AL or AX
+    /// as the fixed destination and one immediate. Bits 5:3 select the
+    /// operation, bit 0 selects AL/AX; the byte immediate is a raw byte
+    /// (`04`–`3C`) and the word immediate is full `imm16` (`05`–`3D`).
+    /// CMP (```/7``) computes flags without touching the accumulator.
+    fn alu_acc_imm(&mut self, op: u8) -> Result<(), StepError> {
+        let alu_op = (op >> 3) & 0b111;
+        let wide = op & 1 == 1;
+        // Read the carry-in before the result's flags are written back, so
+        // ADC/SBB see the CF produced by the previous instruction.
+        let carry = u16::from(self.flags.get(Flags::CF));
+        let (acc, imm) = if wide {
+            (self.regs.reg(Reg16::Ax), self.fetch16())
+        } else {
+            (
+                u16::from(self.regs.reg8(Reg8::Al)),
+                u16::from(self.fetch8()),
+            )
+        };
+        let (r, f) = Self::alu_binary(alu_op, wide, acc, imm, carry);
+        if wide {
+            if alu_op != 7 {
+                self.regs.set_reg(Reg16::Ax, r);
+            }
+        } else if alu_op != 7 {
+            self.regs.set_reg8(Reg8::Al, r as u8);
+        }
+        self.set_flag_bits(f);
+        Ok(())
+    }
+
+    /// `40`–`47` INC r16, `48`–`4F` DEC r16: everything but CF is the
+    /// `add`/`sub`-by-one flag machine.
+    fn inc_dec_r16(&mut self, op: u8) {
+        let r = Reg16::from_index(op);
+        let value = self.regs.reg(r);
+        let (next, f) = if op < 0x48 {
+            alu::inc(value)
+        } else {
+            alu::dec(value)
+        };
+        self.regs.set_reg(r, next);
+        self.set_flag_bits_preserving_carry(f);
+    }
+
+    /// `FE /0 /1` and `FF /0 /1`: INC/DEC r/m8 and INC/DEC r/m16 through
+    /// the operand decoder. The remaining `/N` fields of `FE`/`FF` are
+    /// reported as unsupported forms.
+    fn inc_dec_rm(&mut self, op: u8, start: u16) -> Result<(), StepError> {
+        let modrm = self.fetch8();
+        let field = (modrm >> 3) & 0b111;
+        let wide = op == 0xFF;
+        if field > 1 {
+            return Err(StepError::UnsupportedForm {
+                ip: start,
+                bytes: self.consumed_bytes(start),
+            });
+        }
+        let dst = self.decode_rm(modrm, wide);
+        let value = dst.read(&self.regs, &self.mem);
+        let (next, f) = match (field, wide) {
+            (0, true) => alu::inc(value),
+            (0, false) => {
+                let (r, f) = alu::inc8(value as u8);
+                (u16::from(r), f)
+            }
+            (1, true) => alu::dec(value),
+            _ => {
+                let (r, f) = alu::dec8(value as u8);
+                (u16::from(r), f)
+            }
+        };
+        dst.write(&mut self.regs, &mut self.mem, next);
+        self.set_flag_bits_preserving_carry(f);
+        Ok(())
+    }
+
+    /// `70`–`7F`: the full short-jump conditional set; the opcode's low
+    /// nibble indexes the condition in hardware order. Every jcc consumes
+    /// exactly the disp8 whether or not it is taken.
+    fn jcc(&mut self, op: u8) {
+        let disp = self.fetch8() as i8 as u16;
+        if self.condition(op & 0xF) {
+            self.ip = self.ip.wrapping_add(disp);
+        }
+    }
+
+    fn condition(&self, index: u8) -> bool {
+        let of = self.flags.get(Flags::OF);
+        let cf = self.flags.get(Flags::CF);
+        let zf = self.flags.get(Flags::ZF);
+        let sf = self.flags.get(Flags::SF);
+        let pf = self.flags.get(Flags::PF);
+        match index {
+            0 => of,
+            1 => !of,
+            2 => cf,
+            3 => !cf,
+            4 => zf,
+            5 => !zf,
+            6 => cf || zf,
+            7 => !cf && !zf,
+            8 => sf,
+            9 => !sf,
+            10 => pf,
+            11 => !pf,
+            12 => sf != of,
+            13 => sf == of,
+            14 => zf || sf != of,
+            _ => !zf && sf == of,
+        }
+    }
+
+    /// `E0`/`E1`/`E2`: LOOPNE/LOOPE/LOOP. CX is decremented with no flag
+    /// write of any kind; the re-entry conditions layer `CX != 0` with the
+    /// ZF test for the E1/E0 variants. A CX that starts at 0 wraps to FFFF
+    /// and takes the branch.
+    fn loop_family(&mut self, op: u8) {
+        let disp = self.fetch8() as i8 as u16;
+        let cx = self.regs.reg(Reg16::Cx).wrapping_sub(1);
+        self.regs.set_reg(Reg16::Cx, cx);
+        let take = match op {
+            0xE0 => cx != 0 && !self.flags.get(Flags::ZF),
+            0xE1 => cx != 0 && self.flags.get(Flags::ZF),
+            _ => cx != 0,
+        };
+        if take {
+            self.ip = self.ip.wrapping_add(disp);
+        }
+    }
+
+    fn consumed_bytes(&self, start: u16) -> Vec<u8> {
+        let mut off = start;
+        let mut out = Vec::new();
+        while off != self.ip && out.len() < 16 {
+            out.push(self.mem.read(Memory::linear(self.regs.seg(Seg::Cs), off)));
+            off = off.wrapping_add(1);
+        }
+        out
     }
 
     fn mov_rm_reg(&mut self, op: u8) {
@@ -292,6 +448,14 @@ impl Cpu {
     fn set_flag_bits(&mut self, f: u16) {
         self.flags
             .set_bits((self.flags.bits() & !Flags::SETTABLE) | f);
+    }
+
+    /// Flag write-back for INC/DEC: the helper's word arrives with CF
+    /// cleared, so OR-ing the incoming CF bit back preserves it while the
+    /// remaining arithmetic flags come from the helper.
+    fn set_flag_bits_preserving_carry(&mut self, f: u16) {
+        let carry = u16::from(self.flags.get(Flags::CF));
+        self.set_flag_bits(f | carry);
     }
 
     pub fn linear_ip(&self) -> usize {
@@ -338,6 +502,14 @@ mod tests {
     fn cpu_with(code: &[u8]) -> Cpu {
         let mut cpu = Cpu::new();
         cpu.load_flat(RESET_SEG, RESET_OFF, code);
+        cpu
+    }
+
+    fn loaded_to_halt(code: &[u8]) -> Cpu {
+        let mut cpu = cpu_with(code);
+        while !cpu.halted {
+            cpu.step().unwrap();
+        }
         cpu
     }
 
@@ -885,6 +1057,707 @@ mod tests {
         assert_eq!(cpu.regs.reg(Reg16::Ax), 0xFFFF);
         // PF (0xFF parity) | SF (bit 15 of 0xFFFF).
         assert_eq!(cpu.flags.bits(), 0xF086);
+    }
+
+    // -----------------------------------------------------------------------
+    // The operand-carrier ALU families. `alu_binary` is the one group-1
+    // table: the sweeps below route every opcode byte through `step` with
+    // one (dst, src) pair — 0xF8/0x09 at both widths — and compare against
+    // the same helpers the immediate path uses. CF is pre-set on every row
+    // so ADC/SBB cannot pass for ADD/SUB anywhere. The pair is chosen so
+    // all eight fields land on distinct results at both widths.
+    // -----------------------------------------------------------------------
+
+    const SWEEP_A16: u16 = 0x00F8;
+    const SWEEP_B16: u16 = 0x0009;
+
+    #[test]
+    fn rm_reg_word_routes_all_eight_fields_both_directions() {
+        for alu_op in 0u8..8 {
+            let expected = Cpu::alu_binary(alu_op, true, SWEEP_A16, SWEEP_B16, 1);
+            // 01/09/...|3: ADD Ev,Gv — r/m (AX) receives op(AX, CX).
+            let mut cpu = cpu_with(&[(0x01 | (alu_op << 3)), 0b11_001_000, 0xF4]);
+            cpu.regs.set_reg(Reg16::Ax, SWEEP_A16);
+            cpu.regs.set_reg(Reg16::Cx, SWEEP_B16);
+            cpu.flags.set(Flags::CF, true);
+            cpu.step().unwrap();
+            assert_eq!(cpu.ip, RESET_OFF + 2, "d0 field {alu_op}");
+            if alu_op != 7 {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), expected.0, "d0 field {alu_op}");
+            } else {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), SWEEP_A16, "cmp d0 {alu_op}");
+            }
+            assert_eq!(cpu.regs.reg(Reg16::Cx), SWEEP_B16, "d0 field {alu_op}");
+            assert_eq!(cpu.flags.bits(), 0xF002 | expected.1, "d0 field {alu_op}");
+
+            // 03/0B/...|1: ADD Gv,Ev — the reg field (CX) receives op(CX, AX).
+            let mut cpu = cpu_with(&[(0x03 | (alu_op << 3)), 0b11_001_000, 0xF4]);
+            cpu.regs.set_reg(Reg16::Cx, SWEEP_A16);
+            cpu.regs.set_reg(Reg16::Ax, SWEEP_B16);
+            cpu.flags.set(Flags::CF, true);
+            cpu.step().unwrap();
+            assert_eq!(cpu.ip, RESET_OFF + 2, "d1 field {alu_op}");
+            if alu_op != 7 {
+                assert_eq!(cpu.regs.reg(Reg16::Cx), expected.0, "d1 field {alu_op}");
+            } else {
+                assert_eq!(cpu.regs.reg(Reg16::Cx), SWEEP_A16, "cmp d1 {alu_op}");
+            }
+            assert_eq!(cpu.regs.reg(Reg16::Ax), SWEEP_B16, "d1 field {alu_op}");
+            assert_eq!(cpu.flags.bits(), 0xF002 | expected.1, "d1 field {alu_op}");
+        }
+    }
+
+    #[test]
+    fn rm_reg_byte_routes_all_eight_fields_both_directions() {
+        for alu_op in 0u8..8 {
+            let expected = Cpu::alu_binary(alu_op, false, 0xF8, 0x09, 1);
+            // 00/08/...|0: ADD Gb,Gb with d = 0 — AL receives op(AL, CL).
+            let mut cpu = cpu_with(&[alu_op << 3, 0b11_001_000, 0xF4]);
+            cpu.regs.set_reg(Reg16::Ax, 0x1200 | 0xF8);
+            cpu.regs.set_reg(Reg16::Cx, 0x3400 | 0x09);
+            cpu.flags.set(Flags::CF, true);
+            cpu.step().unwrap();
+            if alu_op != 7 {
+                assert_eq!(
+                    cpu.regs.reg(Reg16::Ax),
+                    0x1200 | expected.0,
+                    "d0 field {alu_op}"
+                );
+            } else {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), 0x12F8, "cmp d0 {alu_op}");
+            }
+            assert_eq!(cpu.regs.reg(Reg16::Cx), 0x3409, "d0 field {alu_op}");
+            assert_eq!(cpu.flags.bits(), 0xF002 | expected.1, "d0 field {alu_op}");
+
+            // 02/0A/...|2: ADD Gb,Eb with d = 1 — AL (reg) receives op(AL, CL).
+            let mut cpu = cpu_with(&[(0x02 | (alu_op << 3)), 0b11_000_001, 0xF4]);
+            cpu.regs.set_reg(Reg16::Ax, 0x1200 | 0xF8);
+            cpu.regs.set_reg(Reg16::Cx, 0x3400 | 0x09);
+            cpu.flags.set(Flags::CF, true);
+            cpu.step().unwrap();
+            if alu_op != 7 {
+                assert_eq!(
+                    cpu.regs.reg(Reg16::Ax),
+                    0x1200 | expected.0,
+                    "d1 field {alu_op}"
+                );
+            } else {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), 0x12F8, "cmp d1 {alu_op}");
+            }
+            assert_eq!(cpu.regs.reg(Reg16::Cx), 0x3409, "d1 field {alu_op}");
+            assert_eq!(cpu.flags.bits(), 0xF002 | expected.1, "d1 field {alu_op}");
+        }
+    }
+
+    #[test]
+    fn rm_reg_word_memory_destination_round_trips_all_fields() {
+        for alu_op in 0u8..8 {
+            let expected = Cpu::alu_binary(alu_op, true, SWEEP_A16, SWEEP_B16, 1);
+            // 01|8k with reg=CX over rm=[BX]: memory receives op(mem, CX).
+            let mut cpu = cpu_with(&[(0x01 | (alu_op << 3)), 0b00_001_111, 0xF4]);
+            cpu.regs.set_reg(Reg16::Bx, 0x0010);
+            cpu.mem.write_word(0x0010, SWEEP_A16);
+            cpu.regs.set_reg(Reg16::Cx, SWEEP_B16);
+            cpu.flags.set(Flags::CF, true);
+            cpu.step().unwrap();
+            assert_eq!(cpu.ip, RESET_OFF + 2, "field {alu_op}");
+            let after = cpu.mem.read_word(0x0010);
+            if alu_op != 7 {
+                assert_eq!(after, expected.0, "field {alu_op}");
+            } else {
+                assert_eq!(after, SWEEP_A16, "cmp keeps the memory operand");
+            }
+            assert_eq!(cpu.regs.reg(Reg16::Cx), SWEEP_B16, "field {alu_op}");
+            assert_eq!(cpu.flags.bits(), 0xF002 | expected.1, "field {alu_op}");
+        }
+    }
+
+    #[test]
+    fn rm_reg_word_memory_source_loads_through_decoder() {
+        for alu_op in 0u8..8 {
+            let expected = Cpu::alu_binary(alu_op, true, SWEEP_A16, SWEEP_B16, 1);
+            // 03|8k with reg=AX over rm=[BX]: AX receives op(AX, mem).
+            let mut cpu = cpu_with(&[(0x03 | (alu_op << 3)), 0b00_000_111, 0xF4]);
+            cpu.regs.set_reg(Reg16::Bx, 0x0010);
+            cpu.mem.write_word(0x0010, SWEEP_B16);
+            cpu.regs.set_reg(Reg16::Ax, SWEEP_A16);
+            cpu.flags.set(Flags::CF, true);
+            cpu.step().unwrap();
+            if alu_op != 7 {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), expected.0, "field {alu_op}");
+            } else {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), SWEEP_A16, "field {alu_op}");
+            }
+            assert_eq!(cpu.mem.read_word(0x0010), SWEEP_B16, "field {alu_op}");
+            assert_eq!(cpu.flags.bits(), 0xF002 | expected.1, "field {alu_op}");
+        }
+    }
+
+    #[test]
+    fn rm_reg_word_add_matches_group1_word_words() {
+        // 01 C8 = add ax, cx. 0xFFFF + 1 = 0 — the same flag word the
+        // immediate path produced for these operands (CF|ZF|AF|PF).
+        let mut cpu = cpu_with(&[0x01, 0xC8]);
+        cpu.regs.set_reg(Reg16::Ax, 0xFFFF);
+        cpu.regs.set_reg(Reg16::Cx, 1);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0);
+        assert_eq!(cpu.flags.bits(), 0xF057);
+    }
+
+    #[test]
+    fn rm_reg_word_sbb_consumes_carry() {
+        // 1B C8 = sbb cx, ax with CF = 1: 1 - 0 - 1 = 0. ADD's flags word
+        // would keep CX at 1 and clear PF.
+        let mut cpu = cpu_with(&[0x1B, 0xC8]);
+        cpu.regs.set_reg(Reg16::Cx, 1);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0);
+        assert_eq!(cpu.flags.bits(), 0xF046);
+    }
+
+    #[test]
+    fn rm_reg_byte_or_keeps_high_byte_and_sets_byte_sf() {
+        // 08 C8 = or al, cl: 0xF0 | 0xFF = 0xFF; AH survives the byte RMW.
+        let mut cpu = cpu_with(&[0x08, 0xC8]);
+        cpu.regs.set_reg(Reg16::Ax, 0x12F0);
+        cpu.regs.set_reg(Reg16::Cx, 0x34FF);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x12FF);
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0x34FF);
+        // PF (0xFF parity) | SF (bit 7 of the byte result).
+        assert_eq!(cpu.flags.bits(), 0xF086);
+    }
+
+    #[test]
+    fn rm_reg_byte_xor_clears_byte_carry_and_overflow() {
+        // 30 C8 = xor al, cl: 0xF0 ^ 0xFF = 0x0F; OR would have left 0xFF.
+        let mut cpu = cpu_with(&[0x30, 0xC8]);
+        cpu.regs.set_reg(Reg16::Ax, 0x12F0);
+        cpu.regs.set_reg(Reg16::Cx, 0x34FF);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x120F);
+        // 0x0F has even parity → PF, no other status flags.
+        assert_eq!(cpu.flags.bits(), 0xF006);
+    }
+
+    #[test]
+    fn rm_reg_consumes_opcode_modrm_and_displacement_only() {
+        let cases: &[(&[u8], u16)] = &[
+            (&[0x00, 0x07, 0xF4], 3),             // add byte [bx], al
+            (&[0x01, 0x47, 0x02, 0xF4], 4),       // add word [bx+2], ax
+            (&[0x02, 0x87, 0x34, 0x12, 0xF4], 5), // add al, [bx+0x1234]
+            (&[0x03, 0xC8, 0xF4], 3),             // add cx, ax
+            (&[0x39, 0x1F, 0xF4], 3),             // cmp word [bx], cx
+            (&[0x38, 0xC1, 0xF4], 3),             // cmp cl, al
+        ];
+        for &(code, end) in cases {
+            let cpu = loaded_to_halt(code);
+            assert_eq!(cpu.ip, end, "code {code:02x?}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Accumulator-immediate family (04–3D): the fixed AL/AX destination.
+    // One (AL/AX, imm) pair at each width; the byte immediate is a raw byte,
+    // the word immediate a full imm16.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn accumulator_byte_family_routes_all_eight_fields() {
+        for alu_op in 0u8..8 {
+            let mut cpu = cpu_with(&[0x04 | (alu_op << 3), 0x09]);
+            cpu.regs.set_reg(Reg16::Ax, 0x1200 | 0xF8);
+            cpu.flags.set(Flags::CF, true);
+            cpu.step().unwrap();
+            assert_eq!(cpu.ip, RESET_OFF + 2, "field {alu_op}");
+            let expected = Cpu::alu_binary(alu_op, false, 0xF8, 0x09, 1);
+            if alu_op != 7 {
+                assert_eq!(
+                    cpu.regs.reg(Reg16::Ax),
+                    0x1200 | expected.0,
+                    "field {alu_op}"
+                );
+            } else {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), 0x12F8, "cmp field {alu_op}");
+            }
+            assert_eq!(cpu.flags.bits(), 0xF002 | expected.1, "field {alu_op}");
+        }
+    }
+
+    #[test]
+    fn accumulator_word_family_routes_all_eight_fields() {
+        for alu_op in 0u8..8 {
+            let mut cpu = cpu_with(&[0x05 | (alu_op << 3), 0x09, 0x00]);
+            cpu.regs.set_reg(Reg16::Ax, SWEEP_A16);
+            cpu.flags.set(Flags::CF, true);
+            cpu.step().unwrap();
+            assert_eq!(cpu.ip, RESET_OFF + 3, "field {alu_op}");
+            let expected = Cpu::alu_binary(alu_op, true, SWEEP_A16, SWEEP_B16, 1);
+            if alu_op != 7 {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), expected.0, "field {alu_op}");
+            } else {
+                assert_eq!(cpu.regs.reg(Reg16::Ax), SWEEP_A16, "cmp field {alu_op}");
+            }
+            assert_eq!(cpu.flags.bits(), 0xF002 | expected.1, "field {alu_op}");
+        }
+    }
+
+    #[test]
+    fn accumulator_byte_adc_consumes_carry_exact_word() {
+        // 14 00 = adc al, 0 with CF = 1: 0x12xx + 0 + 1; AH is untouched.
+        let mut cpu = cpu_with(&[0x14, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 0x1200);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x1201);
+        assert_eq!(cpu.flags.bits(), 0xF002);
+    }
+
+    #[test]
+    fn accumulator_byte_sbb_consumes_borrow_exact_word() {
+        // 1C 00 = sbb al, 0 with CF = 1: 1 - 0 - 1 = 0 → ZF|PF on AH=0x12.
+        let mut cpu = cpu_with(&[0x1C, 0x00]);
+        cpu.regs.set_reg(Reg16::Ax, 0x1201);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x1200);
+        assert_eq!(cpu.flags.bits(), 0xF046);
+    }
+
+    #[test]
+    fn accumulator_word_xor_clears_carry_and_overflow() {
+        // 35 FF FF = xor ax, imm16: 0x5A5A ^ 0xFFFF = 0xA5A5 → SF|PF.
+        let mut cpu = cpu_with(&[0x35, 0xFF, 0xFF]);
+        cpu.regs.set_reg(Reg16::Ax, 0x5A5A);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0xA5A5);
+        assert_eq!(cpu.flags.bits(), 0xF086);
+    }
+
+    // -----------------------------------------------------------------------
+    // INC/DEC — the pro-carrier ops: CF is preserved bit-for-bit while every
+    // other arithmetic flag follows add/sub by one.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn inc_dec_r16_wrap_all_registers_with_one_flag_tail() {
+        // FFFE -> inc -> FFFF -> inc -> 0 -> dec -> FFFF -> dec -> FFFE.
+        // The tail word is always SF (0xF082) for every register, SP
+        // included — INC/DEC never touch the stack.
+        for i in 0u8..8 {
+            let mut cpu = cpu_with(&[0x40 + i, 0x40 + i, 0x48 + i, 0x48 + i]);
+            cpu.regs.set_reg(Reg16::from_index(i), 0xFFFE);
+            for _ in 0..4 {
+                cpu.step().unwrap();
+            }
+            assert_eq!(cpu.regs.reg(Reg16::from_index(i)), 0xFFFE);
+            assert_eq!(cpu.flags.bits(), 0xF082, "reg {i}");
+        }
+    }
+
+    #[test]
+    fn inc_r16_preserves_carry_exactly() {
+        // inc ax with CF set: 0 + 1 = 1 raises no flags; CF must survive
+        // untouched (ADD by one would have left it, SUB would too).
+        let mut cpu = cpu_with(&[0x40]);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 1);
+        assert!(cpu.flags.get(Flags::CF));
+        assert!(!cpu.flags.get(Flags::ZF));
+        assert_eq!(cpu.flags.bits(), 0xF003);
+    }
+
+    #[test]
+    fn inc_r16_wraps_negative_with_over_and_sign_set() {
+        // 0x7FFF + 1 = 0x8000 → OF|SF|AF|PF, CF preserved (clear here).
+        let mut cpu = cpu_with(&[0x40]);
+        cpu.regs.set_reg(Reg16::Ax, 0x7FFF);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x8000);
+        assert_eq!(cpu.flags.bits(), 0xF896);
+    }
+
+    #[test]
+    fn dec_r16_borrows_with_carry_exactly() {
+        // 0x8000 - 1 = 0x7FFF → OF|AF|PF; SF must clear, CF untouched.
+        let mut cpu = cpu_with(&[0x4F]);
+        cpu.regs.set_reg(Reg16::Di, 0x8000);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Di), 0x7FFF);
+        assert_eq!(cpu.flags.bits(), 0xF816);
+    }
+
+    #[test]
+    fn inc_r16_carry_survives_word_wrap() {
+        // 0xFFFF inc → 0: add(x, 1) would set CF; INC keeps the old CF = 1.
+        let mut cpu = cpu_with(&[0x47]);
+        cpu.regs.set_reg(Reg16::Di, 0xFFFF);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Di), 0);
+        assert!(cpu.flags.get(Flags::CF), "CF untouched");
+        assert!(cpu.flags.get(Flags::ZF));
+        assert_eq!(cpu.flags.bits(), 0xF057);
+    }
+
+    #[test]
+    fn inc_matches_add_one_except_carry_word() {
+        let xs = [
+            0x0000, 0x000F, 0x0010, 0x007F, 0x0080, 0x00FF, 0x7FFF, 0x8000, 0xFF0F, 0xFFFF,
+        ];
+        for &x in &xs {
+            for cf in [false, true] {
+                let mut adder = cpu_with(&[0x05, 0x01, 0x00]);
+                adder.regs.set_reg(Reg16::Ax, x);
+                adder.flags.set(Flags::CF, cf);
+                adder.step().unwrap();
+
+                let mut inced = cpu_with(&[0x40]);
+                inced.regs.set_reg(Reg16::Ax, x);
+                inced.flags.set(Flags::CF, cf);
+                inced.step().unwrap();
+
+                assert_eq!(inced.regs.reg(Reg16::Ax), adder.regs.reg(Reg16::Ax));
+                let without_carry = Flags::CF;
+                assert_eq!(
+                    inced.flags.bits() & !without_carry,
+                    adder.flags.bits() & !without_carry,
+                    "x {x:#06x} cf {cf}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dec_matches_sub_one_except_carry_word() {
+        let xs = [
+            0x0000, 0x000F, 0x0010, 0x007F, 0x0080, 0x0100, 0x7FFF, 0x8000, 0xFF0F, 0xFFFF,
+        ];
+        for &x in &xs {
+            for cf in [false, true] {
+                let mut suber = cpu_with(&[0x2D, 0x01, 0x00]);
+                suber.regs.set_reg(Reg16::Ax, x);
+                suber.flags.set(Flags::CF, cf);
+                suber.step().unwrap();
+
+                let mut deced = cpu_with(&[0x48]);
+                deced.regs.set_reg(Reg16::Ax, x);
+                deced.flags.set(Flags::CF, cf);
+                deced.step().unwrap();
+
+                assert_eq!(deced.regs.reg(Reg16::Ax), suber.regs.reg(Reg16::Ax));
+                let without_carry = Flags::CF;
+                assert_eq!(
+                    deced.flags.bits() & !without_carry,
+                    suber.flags.bits() & !without_carry,
+                    "x {x:#06x} cf {cf}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inc_byte_matches_add_one_except_carry() {
+        let xs = [0x00, 0x0F, 0x10, 0x7F, 0x80, 0xFF];
+        for &x in &xs {
+            for cf in [false, true] {
+                let mut adder = cpu_with(&[0x80, 0xC0, 0x01]);
+                adder.regs.set_reg(Reg16::Ax, x);
+                adder.flags.set(Flags::CF, cf);
+                adder.step().unwrap();
+
+                let mut inced = cpu_with(&[0xFE, 0xC0]);
+                inced.regs.set_reg(Reg16::Ax, x);
+                inced.flags.set(Flags::CF, cf);
+                inced.step().unwrap();
+
+                assert_eq!(inced.regs.reg(Reg16::Ax), adder.regs.reg(Reg16::Ax));
+                let without_carry = Flags::CF;
+                assert_eq!(
+                    inced.flags.bits() & !without_carry,
+                    adder.flags.bits() & !without_carry,
+                    "x {x:#04x} cf {cf}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dec_byte_matches_sub_one_except_carry() {
+        let xs = [0x00, 0x0F, 0x10, 0x7F, 0x80, 0xFF];
+        for &x in &xs {
+            for cf in [false, true] {
+                let mut suber = cpu_with(&[0x80, 0xE8, 0x01]);
+                suber.regs.set_reg(Reg16::Ax, x);
+                suber.flags.set(Flags::CF, cf);
+                suber.step().unwrap();
+
+                let mut deced = cpu_with(&[0xFE, 0xC8]);
+                deced.regs.set_reg(Reg16::Ax, x);
+                deced.flags.set(Flags::CF, cf);
+                deced.step().unwrap();
+
+                assert_eq!(deced.regs.reg(Reg16::Ax), suber.regs.reg(Reg16::Ax));
+                let without_carry = Flags::CF;
+                assert_eq!(
+                    deced.flags.bits() & !without_carry,
+                    suber.flags.bits() & !without_carry,
+                    "x {x:#04x} cf {cf}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inc_dec_rm_memory_byte_and_word_preserve_carry() {
+        // FE /0 = inc byte [bx] with CF = 1: 0xFF wraps to 0 with ZF|AF|PF
+        // and the old CF. The byte form must not widen its SF/ZF.
+        let mut cpu = cpu_with(&[0xFE, 0x07]);
+        cpu.regs.set_reg(Reg16::Bx, 0x0010);
+        cpu.mem.write(0x0010, 0xFF);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.mem.read(0x0010), 0x00);
+        assert_eq!(cpu.flags.bits(), 0xF057);
+
+        // FF /1 = dec word [bx]: 0x0001 - 1 = 0 keeps CF and raises ZF|PF.
+        let mut cpu = cpu_with(&[0xFF, 0x0F]);
+        cpu.regs.set_reg(Reg16::Bx, 0x0020);
+        cpu.mem.write_word(0x0020, 0x0001);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.mem.read_word(0x0020), 0x0000);
+        assert!(cpu.flags.get(Flags::CF));
+        assert!(cpu.flags.get(Flags::ZF));
+        assert!(!cpu.flags.get(Flags::SF));
+        assert_eq!(cpu.flags.bits(), 0xF047);
+    }
+
+    #[test]
+    fn inc_dec_rm_register_forms_route_the_right_operand() {
+        // FE C0 = inc al, FF C8 = dec ax — register-direct, byte vs word.
+        let mut cpu = cpu_with(&[0xFE, 0xC0, 0xFF, 0xC8]);
+        cpu.regs.set_reg(Reg16::Ax, 0x00FF);
+        cpu.flags.set(Flags::CF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0x0000, "byte inc wraps AL only");
+        assert_eq!(cpu.flags.bits(), 0xF057, "CF kept; ZF|AF|PF from the wrap");
+        cpu.step().unwrap();
+        // 0x0000 - 1 (word) = 0xFFFF → SF|AF|PF, CF preserved.
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 0xFFFF);
+        assert_eq!(cpu.flags.bits(), 0xF097);
+    }
+
+    #[test]
+    fn fe_ff_unsupported_reg_fields_report_form_bytes() {
+        // FE /2 is not implemented; the error carries the instruction bytes
+        // as consumed so far.
+        let mut cpu = cpu_with(&[0xFE, 0xD0]);
+        let err = cpu.step().unwrap_err();
+        assert_eq!(
+            err,
+            StepError::UnsupportedForm {
+                ip: RESET_OFF,
+                bytes: vec![0xFE, 0xD0],
+            }
+        );
+        assert_eq!(cpu.ip, RESET_OFF + 2);
+
+        // FF /4 = JMP r/m16 — decoded syntactically but unsupported.
+        let mut cpu = cpu_with(&[0xFF, 0xE0]);
+        let err = cpu.step().unwrap_err();
+        assert_eq!(
+            err,
+            StepError::UnsupportedForm {
+                ip: RESET_OFF,
+                bytes: vec![0xFF, 0xE0],
+            }
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Full Jcc family (70–7F): the taken/not-taken table for all sixteen
+    // conditions, each with a pair of flag words that distinguishes it.
+    // -----------------------------------------------------------------------
+
+    fn set_arith_flags(cpu: &mut Cpu, bits: u16) {
+        for &mask in &[
+            Flags::CF,
+            Flags::PF,
+            Flags::AF,
+            Flags::ZF,
+            Flags::SF,
+            Flags::OF,
+        ] {
+            cpu.flags.set(mask, bits & mask != 0);
+        }
+    }
+
+    #[test]
+    fn jcc_table_takes_and_declines_all_sixteen_conditions() {
+        // (op, flags that take it, flags that decline it).
+        let cases: &[(u8, u16, u16)] = &[
+            (0x70, Flags::OF, 0),                     // jo
+            (0x71, 0, Flags::OF),                     // jno
+            (0x72, Flags::CF, 0),                     // jb
+            (0x73, 0, Flags::CF),                     // jae
+            (0x74, Flags::ZF, 0),                     // je
+            (0x75, 0, Flags::ZF),                     // jne
+            (0x76, Flags::ZF, 0),                     // jbe (ZF alone takes it)
+            (0x77, 0, Flags::CF),                     // ja (needs neither)
+            (0x78, Flags::SF, 0),                     // js
+            (0x79, 0, Flags::SF),                     // jns
+            (0x7A, Flags::PF, 0),                     // jp
+            (0x7B, 0, Flags::PF),                     // jnp
+            (0x7C, Flags::SF, 0),                     // jl (SF≠OF; SF==OF declines)
+            (0x7D, Flags::SF | Flags::OF, Flags::SF), // jge (SF==OF takes; SF≠OF declines)
+            (0x7E, Flags::ZF, Flags::SF | Flags::OF), // jle (ZF | SF≠OF)
+            (0x7F, 0, Flags::ZF),                     // jg (¬ZF & SF==OF)
+        ];
+        for &(op, taken, declined) in cases {
+            // Layout: [jcc, +1] skips one hlt and lands on the final hlt.
+            let code = [op, 0x01, 0xF4, 0xF4];
+            let mut cpu = cpu_with(&code);
+            set_arith_flags(&mut cpu, taken);
+            cpu.step().unwrap();
+            assert_eq!(cpu.ip, RESET_OFF + 3, "{op:#04x} should take the jump");
+
+            let mut cpu = cpu_with(&code);
+            set_arith_flags(&mut cpu, declined);
+            cpu.step().unwrap();
+            assert_eq!(cpu.ip, RESET_OFF + 2, "{op:#04x} should fall through");
+        }
+    }
+
+    #[test]
+    fn jcc_leave_flags_unchanged_family() {
+        let suit = [0x70u8, 0x71, 0x72, 0x73, 0x76, 0x77, 0x7C, 0x7D, 0x7E, 0x7F];
+        for &op in &suit {
+            let mut cpu = cpu_with(&[op, 0x00, 0xF4]);
+            set_arith_flags(&mut cpu, Flags::SF | Flags::PF);
+            let before = cpu.flags.bits();
+            cpu.step().unwrap();
+            assert_eq!(cpu.flags.bits(), before, "{op:#04x} must not write flags");
+            assert_eq!(cpu.ip, RESET_OFF + 2, "{op:#04x} consumes 2 bytes");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Loop family (E0–E2): CX decremented, no flag writes of any kind;
+    // LOOPE re-enters only while ZF holds, LOOPNE until ZF sets.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn loop_counts_down_and_never_touches_flags() {
+        // 0: mov ax, 0 | 3: cmp ax, 0 (forces ZF=1) | 6: add ax, 2 | 9: loop 6.
+        // Plain LOOP ignores ZF, so the stale ZF from cmp must not matter.
+        let mut cpu = cpu_with(&[
+            0xB8, 0x00, 0x00, // mov ax, 0
+            0x83, 0xF8, 0x00, // cmp ax, 0 -> ZF set
+            0x05, 0x02, 0x00, // add ax, 2
+            0xE2, 0xFB, // loop: after = 0x000B; target 6 = 0x000B - 5
+            0xF4,
+        ]);
+        cpu.regs.set_reg(Reg16::Cx, 3);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert!(cpu.flags.get(Flags::ZF), "cmp ax, 0 raised ZF");
+        for _ in 0..3 {
+            cpu.step().unwrap(); // add ax, 2 — this writes flags
+            let before = cpu.flags.bits();
+            cpu.step().unwrap(); // loop: CX decremented, no flags
+            assert_eq!(cpu.flags.bits(), before, "loop must not write flags");
+        }
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0);
+        assert_eq!(cpu.regs.reg(Reg16::Ax), 6);
+        cpu.step().unwrap();
+        assert!(cpu.halted);
+    }
+
+    #[test]
+    fn loop_with_cx_zero_wraps_to_ffff_and_takes_the_branch() {
+        // E2 FF: after = 2; 2 + 0xFFFF wraps to 0x0001.
+        let mut cpu = cpu_with(&[0xE2, 0xFF, 0xF4]);
+        cpu.regs.set_reg(Reg16::Cx, 0);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0xFFFF, "CX wraps on the decrement");
+        assert_eq!(
+            cpu.ip,
+            RESET_OFF + 1,
+            "a 0-starting CX still takes the branch"
+        );
+    }
+
+    #[test]
+    fn loope_exits_when_zf_clears() {
+        // 0: mov ax, 0 | 3: cmp ax, 0 (ZF=1) | 6: inc ax (ZF clears)
+        // 7: loope 6 | 9: hlt.
+        let mut cpu = cpu_with(&[
+            0xB8, 0x00, 0x00, // mov ax, 0
+            0x83, 0xF8, 0x00, // cmp ax, 0
+            0x40, // inc ax — ZF clears
+            0xE1, 0xFD, // loope 0x0006 (after = 9; 9 + 0xFFFD = 6)
+            0xF4,
+        ]);
+        cpu.regs.set_reg(Reg16::Cx, 2);
+        cpu.step().unwrap();
+        cpu.step().unwrap();
+        assert!(cpu.flags.get(Flags::ZF));
+        cpu.step().unwrap(); // inc ax: ZF clears
+        assert!(!cpu.flags.get(Flags::ZF));
+        cpu.step().unwrap(); // loope: CX 2 → 1 but ZF = 0 → falls through
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 1, "CX sinks even on the decline");
+        assert_eq!(cpu.ip, RESET_OFF + 9);
+        cpu.step().unwrap();
+        assert!(cpu.halted);
+    }
+
+    #[test]
+    fn loope_takes_the_back_edge_while_zf_holds() {
+        let mut cpu = cpu_with(&[0xE1, 0xFF]);
+        cpu.regs.set_reg(Reg16::Cx, 2);
+        cpu.flags.set(Flags::ZF, true);
+        cpu.step().unwrap();
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 1);
+        assert_eq!(
+            cpu.ip,
+            RESET_OFF + 1,
+            "disp8 -1 re-enters the single instruction"
+        );
+    }
+
+    #[test]
+    fn loopne_exits_when_zf_sets() {
+        // 0: cmp ax, 0 with AX = 0 → ZF = 1 | 3: loopne 3 | 5: hlt.
+        let mut cpu = cpu_with(&[0x83, 0xF8, 0x00, 0xE0, 0xFD, 0xF4]);
+        cpu.regs.set_reg(Reg16::Cx, 2);
+        cpu.regs.set_reg(Reg16::Ax, 0);
+        cpu.step().unwrap(); // cmp: ZF = 1
+        cpu.step().unwrap(); // loopne: CX 2 → 1, ZF = 1 → declines
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 1);
+        assert_eq!(cpu.ip, RESET_OFF + 5);
+        cpu.step().unwrap();
+        assert!(cpu.halted);
+    }
+
+    #[test]
+    fn loopne_takes_the_back_edge_while_zf_stays_clear() {
+        // 0: cmp ax, 1 with AX = 2 (ZF = 0) | 3: loopne 3 | 5: hlt.
+        let mut cpu = cpu_with(&[0x83, 0xF8, 0x01, 0xE0, 0xFE, 0xF4]);
+        cpu.regs.set_reg(Reg16::Ax, 2);
+        cpu.regs.set_reg(Reg16::Cx, 2);
+        cpu.step().unwrap(); // cmp: ZF = 0
+        let before = cpu.flags.bits();
+        cpu.step().unwrap(); // loopne: CX 2 → 1, ZF clear → take
+        assert_eq!(cpu.ip, RESET_OFF + 3, "re-entered while ZF was clear");
+        cpu.step().unwrap(); // loopne: CX 1 → 0 → falls through on the drain
+        assert_eq!(cpu.regs.reg(Reg16::Cx), 0);
+        assert_eq!(cpu.flags.bits(), before, "loopne never writes flags");
+        cpu.step().unwrap();
+        assert!(cpu.halted);
     }
 
     // -----------------------------------------------------------------------
