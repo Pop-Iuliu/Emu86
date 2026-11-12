@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2, installs just
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2, installs just
         with:
           tool: just
       - name: Install Rust toolchain
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2, installs just
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2, installs just
         with:
           tool: just
       - name: Install Rust toolchain
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2, installs just
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2, installs just
         with:
           tool: just
       - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
